@@ -12,7 +12,7 @@
   <depend>backward_ros</depend>
   <depend>generate_parameter_library</depend>
   <depend>moveit</depend>
-  <depend>PyQt5</depend>
+  <depend>pyqt6</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
