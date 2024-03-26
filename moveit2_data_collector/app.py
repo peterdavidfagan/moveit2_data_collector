@@ -1,18 +1,43 @@
 import sys
 from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QWidget
-from PyQt6.QtGui import QPixmap, QMouseEvent
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtGui import QPixmap, QImage, QMouseEvent
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 
-# Subclass QMainWindow to customize your application's main window
+import rclpy
+from rclpy.node import Node
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image
+
+import cv2
+
+class ImageSubscriber(QThread):
+    new_image = pyqtSignal(object)
+
+    def __init__(self):
+        super().__init__()
+        self.cv_bridge = CvBridge()
+
+    def run(self):
+        rclpy.init(args=None)
+        node = rclpy.create_node('image_subscriber')
+        subscription = node.create_subscription(Image, 'overhead_camera', self.image_callback, 10)
+        rclpy.spin(node)
+
+    def image_callback(self, msg):
+        rgb_img = self.cv_bridge.imgmsg_to_cv2(msg, "rgb8")
+        self.new_image.emit(rgb_img)
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        # Initialize the GUI
         self.initUI()
 
-        # Simulate a ROS topic update every 1000 ms (1 second)
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.updateImage)
-        self.timer.start(1000)  # milliseconds
+        # Start ROS image subscriber
+        self.image_subscriber = ImageSubscriber()
+        self.image_subscriber.new_image.connect(self.update_image)
+        self.image_subscriber.start()
 
     def initUI(self):
         central_widget = QWidget()
@@ -29,7 +54,7 @@ class MainWindow(QMainWindow):
         left_pane.addWidget(self.label_image)
         horizontal_panes.addLayout(left_pane)
 
-    
+
         # Right Pane
 
         # table height input
@@ -59,7 +84,7 @@ class MainWindow(QMainWindow):
         self.y_edit.returnPressed.connect(self.updateCoordinates)
         self.y_edit.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.y_edit.setFixedHeight(20)
-        
+
         # motion planning button
         self.execute_button = QPushButton("Execute Motion Plan")
         self.execute_button.clicked.connect(self.executeMotionPlan)  # Connect clicked signal to executeMotionPlan function
@@ -73,7 +98,7 @@ class MainWindow(QMainWindow):
         right_pane.addWidget(self.execute_button)
 
         horizontal_panes.addLayout(right_pane)
-        
+
         main_screen.addLayout(horizontal_panes)
         central_widget.setLayout(main_screen)
 
@@ -81,38 +106,39 @@ class MainWindow(QMainWindow):
         self.show()
 
     def updateCoordinates(self, event: QMouseEvent):
-        # Get the coordinates of the click event relative to the label
         point = event.pos()
         x = point.x()
         y = point.y()
         self.x_edit.setText(str(x))
         self.y_edit.setText(str(y))
-        #self.label_coordinates.setText(f"Clicked at ({x}, {y})")
 
 
-    def updateImage(self):
-        # Code to update image from ROS topic
-        # For demonstration, updating image with a dummy image
-        pixmap = QPixmap("image.jpg")  # Provide path to your image
+    def executeMotionPlan(self):                                                                                                                                                                                                                                           
+        # Code to execute motion planning function                                                                                                                                                                                                                         
+        print("Executing Motion Plan")                                                                                                                                                                                                                                     
+                                                                                                                                                                                                                                                                           
+    def updateParams(self):                                                                                                                                                                                                                                                
+        # Code to update table height parameter                                                                                                                                                                                                                            
+        self.table_height = float(self.line_edit.text())  # Convert input text to float                                                                                                                                                                                    
+        self.x = float(self.x_edit.text())                                                                                                                                                                                                                                 
+        self.y = float(self.y_edit.text())                                                                                                                                                                                                                                 
+        print("Updating Table Height:", self.table_height)                                                                                                                                                                                                                 
+        print("Updating X Coordinate:", self.x)                                                                                                                                                                                                                            
+        print("Updating Y Coordinate:", self.y)     
+
+
+    def update_image(self, rgb_img):
+        height, width, channel = rgb_img.shape
+        bytes_per_line = channel * width
+        qimg = QImage(rgb_img.data, width, height, QImage.Format(13))
+        pixmap = QPixmap.fromImage(qimg)
         self.label_image.setPixmap(pixmap)
 
-    def executeMotionPlan(self):
-        # Code to execute motion planning function
-        print("Executing Motion Plan")
-
-    def updateParams(self):
-        # Code to update table height parameter
-        self.table_height = float(self.line_edit.text())  # Convert input text to float
-        self.x = float(self.x_edit.text())
-        self.y = float(self.y_edit.text())
-        print("Updating Table Height:", self.table_height)
-        print("Updating X Coordinate:", self.x)
-        print("Updating Y Coordinate:", self.y)
-
-def main():
+def main(args=None):
     app = QApplication(sys.argv)
     ex = MainWindow()
     sys.exit(app.exec())
 
 if __name__ == '__main__':
     main()
+
