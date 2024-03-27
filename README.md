@@ -1,4 +1,5 @@
-Note: this repo is still under construction but should be usable in the coming week.
+
+🚧 Note: this repo is still under construction but should be usable in the coming week.
 
 # moveit2_data_collector
 A PyQT GUI that leverages MoveIt2 to collect real-world data. 
@@ -11,5 +12,7 @@ A PyQT GUI that leverages MoveIt2 to collect real-world data.
 Currently this repository targets the collection of demonstration datasets to train [transporter networks](https://transporternets.github.io/) on real robots.
 
 Sample datasets will be published to [here](https://huggingface.co/peterdavidfagan).
+
+For examples of training transporter networks using the resulting data please see [robot_learning_baselines](https://github.com/peterdavidfagan/robot_learning_baselines).
 
 ## Getting Started
