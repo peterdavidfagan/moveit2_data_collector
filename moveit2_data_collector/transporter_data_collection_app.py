@@ -2,6 +2,7 @@ import os
 import sys
 import math
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 import scipy.spatial.transform as st
 from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QWidget, QFileDialog
 from PyQt6.QtGui import QPixmap, QImage, QMouseEvent
@@ -14,7 +15,7 @@ from sensor_msgs.msg import Image
 
 import cv2
 
-from robot_workspaces.transporter_franka_table import FrankaTable
+from robot_workspaces.mj_transporter_franka_table import FrankaTable
 import envlogger
 
 class ImageSubscriber(QThread):
@@ -25,7 +26,6 @@ class ImageSubscriber(QThread):
         self.cv_bridge = CvBridge()
 
     def run(self):
-        rclpy.init(args=None)
         node = rclpy.create_node('image_subscriber')
         subscription = node.create_subscription(Image, 'overhead_camera', self.image_callback, 10)
         rclpy.spin(node)
@@ -47,10 +47,10 @@ class MainWindow(QMainWindow):
         self.image_subscriber.new_image.connect(self.update_image)
         self.image_subscriber.start()
 
-        # dm env to manage execution and trajectory logging
+        # environment for recording data
         self.env = env
 
-        # application parameters
+        # GUI application parameters
         self.mode = "pick"
         self.table_height = 0.0
         self.x = 0.0
@@ -70,7 +70,7 @@ class MainWindow(QMainWindow):
 
         # Left Pane
         self.label_image = QLabel()
-        self.label_image.mousePressEvent = self.updateCoordinates  # Connect mousePressEvent to getImageCoordinate function
+        self.label_image.mousePressEvent = self.update_pixel_coordinates
         left_pane.addWidget(self.label_image)
         horizontal_panes.addLayout(left_pane)
 
@@ -84,19 +84,7 @@ class MainWindow(QMainWindow):
         self.line_edit.setPlaceholderText("Enter table height")
         self.line_edit.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.line_edit.setFixedHeight(20)
-        self.line_edit.returnPressed.connect(self.updateParams)  # Connect returnPressed signal to updateTableHeight function
-
-        # camera calibration parameters
-        self.label_camera_params = QLabel("Camera Calibration Parameters:")
-        self.label_camera_params.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.label_camera_params.setFixedHeight(20)
-        
-        # button to upload file containing camera calibration parameters
-        self.upload_button = QPushButton("Upload Camera Parameters")
-        self.upload_button.setFixedHeight(20)
-        self.upload_button.clicked.connect(self.uploadCameraParams)  # Connect clicked signal to uploadCameraParams function
-
-        # outline selected coordinates
+        self.line_edit.returnPressed.connect(self.update_application_params)
 
         # pixel coordinates
         self.label_pixel_coords = QLabel("Selected Pixel Coordinates:")
@@ -105,17 +93,15 @@ class MainWindow(QMainWindow):
             
         pixel_coords_box = QHBoxLayout()
         
-        # X pixel coordinate input
         self.x_edit = QLineEdit()
         self.x_edit.setPlaceholderText("X")
-        self.x_edit.returnPressed.connect(self.updateCoordinates)
+        self.x_edit.returnPressed.connect(self.update_pixel_coordinates)
         self.x_edit.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.x_edit.setFixedHeight(20)
 
-        # Y pixel coordinate input
         self.y_edit = QLineEdit()
         self.y_edit.setPlaceholderText("Y")
-        self.y_edit.returnPressed.connect(self.updateCoordinates)
+        self.y_edit.returnPressed.connect(self.update_pixel_coordinates)
         self.y_edit.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.y_edit.setFixedHeight(20)
 
@@ -126,50 +112,60 @@ class MainWindow(QMainWindow):
         self.label_gripper_orientation = QLabel("Enter Gripper Rotation:")
         self.label_gripper_orientation.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.label_gripper_orientation.setFixedHeight(20)
-    
 
         self.gripper_rot_z_edit = QLineEdit()
         self.gripper_rot_z_edit.setPlaceholderText("Z")
         self.gripper_rot_z_edit.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.gripper_rot_z_edit.setFixedHeight(20)
+        
+        # button to upload file containing camera calibration parameters
+        self.upload_button = QPushButton("Upload Camera Parameters")
+        self.upload_button.setFixedHeight(20)
+        self.upload_button.clicked.connect(self.upload_camera_params)
 
         # button to update application parameters
-        self.submit_button = QPushButton("Submit Settings")
-        self.submit_button.clicked.connect(self.updateParams)  # Connect clicked signal to updateTableHeight function
+        self.submit_button = QPushButton("Submit Application Parameters")
+        self.submit_button.clicked.connect(self.update_application_params)
         self.submit_button.setFixedHeight(20)
+        
+        # step environment button
+        self.step_button = QPushButton("Step Environment")
+        self.step_button.clicked.connect(self.env_step)
+        self.step_button.setFixedHeight(20)
+    
+        # reset environment button
+        self.reset_button = QPushButton("Reset Environment")
+        self.reset_button.clicked.connect(self.env_reset)
+        self.reset_button.setFixedHeight(20)
 
-        # motion planning button
-        self.execute_button = QPushButton("Execute Motion Plan")
-        self.execute_button.clicked.connect(self.executeMotionPlan)  # Connect clicked signal to executeMotionPlan function
-        self.execute_button.setFixedHeight(20)
-
+        # add all widgets to right pane
         right_pane.addWidget(self.label_table_height)
         right_pane.addWidget(self.line_edit)
         right_pane.addWidget(self.label_pixel_coords)
         right_pane.addLayout(pixel_coords_box)
         right_pane.addWidget(self.label_gripper_orientation)
         right_pane.addWidget(self.gripper_rot_z_edit)
-        right_pane.addWidget(self.label_camera_params)
-        right_pane.addWidget(self.upload_button)
         right_pane.addWidget(self.submit_button)
-        right_pane.addWidget(self.execute_button)
+        right_pane.addWidget(self.upload_button)
+        right_pane.addWidget(self.step_button)
+        right_pane.addWidget(self.reset_button)
 
+        # add to main screen
         horizontal_panes.addLayout(right_pane)
-
         main_screen.addLayout(horizontal_panes)
         central_widget.setLayout(main_screen)
 
         self.setWindowTitle('Transporter Network Data Collection')
         self.show()
 
-    def updateCoordinates(self, event: QMouseEvent):
+    def update_pixel_coordinates(self, event: QMouseEvent):
         point = event.pos()
         x = point.x()
         y = point.y()
         self.x_edit.setText(str(x))
         self.y_edit.setText(str(y))
 
-    def uploadCameraParams(self):
+    def upload_camera_params(self):
         """
         Reads camera calibration parameters from a json file
         """
@@ -199,7 +195,7 @@ class MainWindow(QMainWindow):
             print("Camera Extrinsics:", self.camera_extrinsics)
 
 
-    def updateParams(self):                                                                                                         # Code to update table height parameter
+    def update_application_params(self):
         self.table_height = float(self.line_edit.text())  # Convert input text to float 
         self.x = float(self.x_edit.text())
         self.y = float(self.y_edit.text())
@@ -224,6 +220,9 @@ class MainWindow(QMainWindow):
         cv2.line(image, (x1, y1), (x2, y2), color, thickness)
 
     def update_image(self, rgb_img):
+        # store the current image
+        self.current_image = rgb_img.copy() 
+
         # overlay a line centred at pixel coord with gripper orientation
         x = int(self.x)
         y = int(self.y)
@@ -238,32 +237,40 @@ class MainWindow(QMainWindow):
         self.label_image.setPixmap(pixmap)
     
 
-    def executeMotionPlan(self):
-        
+    def env_step(self):
         # map pixel coords to world coords
-        
-        ## get depth value from pixel coordinates
-        # TODO: get depth values from camera depth image
-        depth_val = 0.0
+        ## TODO: get depth value from camera 
+        depth_val = 0.4
 
-        ## convert pixels to camera frame coordinates
+        ## convert current pixels coordinates to camera frame coordinates
         pixel_coords = np.array([self.x, self.y])
         image_coords = np.concatenate([pixel_coords, np.ones(1)])
         camera_coords =  np.linalg.inv(self.camera_intrinsics) @ image_coords
-        camera_coords *= -depth_val # negative sign due to mujoco camera convention
+        camera_coords *= -depth_val # negative sign due to mujoco camera convention (for debug only!)
 
         ## convert camera coordinates to world coordinates
         camera_coords = np.concatenate([camera_coords, np.ones(1)])
         world_coords = np.linalg.inv(self.camera_extrinsics) @ camera_coords
         world_coords = world_coords[:3] / world_coords[3]
 
+        print("World Coordinates:", world_coords)
+        
+        world_coords = np.array([0.25, 0.25, 0.5]) # hardcode while debugging
+        quat = R.from_euler('xyz', [0, 180, self.gripper_rot_z], degrees=True).as_quat()
+        pose = np.concatenate([world_coords, quat])
+
         if self.mode == "pick":
-            self.env.step(world_coords)
+            self.env.step(pose)
         else:
-            self.env.step(world_coords)
+            self.env.step(pose)
+    
+    def env_reset(self):
+        self.env.set_observation(self.current_image)
+        self.env.reset()
 
 
 def main(args=None):
+    rclpy.init(args=None)
     env = FrankaTable()
     os.makedirs(os.path.join(os.path.dirname(__file__), "data"), exist_ok=True)
     with envlogger.EnvLogger(
