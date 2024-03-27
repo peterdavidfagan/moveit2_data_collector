@@ -1,6 +1,6 @@
 Note: note usable work in progress.
 
-# moveit_data_collector
+# moveit2_data_collector
 A PyQT GUI that leverages MoveIt2 to collect real-world data to train transporter and other network architectures.
 
 Work in progress, current visual of GUI:
