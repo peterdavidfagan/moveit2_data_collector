@@ -1,3 +1,4 @@
+import os
 import sys
 import math
 import numpy as np
@@ -13,44 +14,8 @@ from sensor_msgs.msg import Image
 
 import cv2
 
-from moveit.planning import MoveItPy
-from moveit_configs_utils import MoveItConfigsBuilder
-from ament_index_python.packages import get_package_share_directory
-
-
-def plan_and_execute(
-    robot,
-    planning_component,
-    logger,
-    single_plan_parameters=None,
-    multi_plan_parameters=None,
-    sleep_time=0.0,
-):
-    """Helper function to plan and execute a motion."""
-    # plan to goal
-    logger.info("Planning trajectory")
-    if multi_plan_parameters is not None:
-        plan_result = planning_component.plan(
-            multi_plan_parameters=multi_plan_parameters
-        )
-    elif single_plan_parameters is not None:
-        plan_result = planning_component.plan(
-            single_plan_parameters=single_plan_parameters
-        )
-    else:
-        plan_result = planning_component.plan()
-
-    # execute the plan
-    if plan_result:
-        logger.info("Executing plan")
-        robot_trajectory = plan_result.trajectory
-        logger.info("Trajectory: {}".format(robot_trajectory))
-        robot.execute(robot_trajectory, controllers=[])
-    else:
-        logger.error("Planning failed")
-
-    time.sleep(sleep_time)
-
+from robot_workspaces.transporter_franka_table import FrankaTable
+import envlogger
 
 class ImageSubscriber(QThread):
     new_image = pyqtSignal(object)
@@ -71,7 +36,7 @@ class ImageSubscriber(QThread):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, env):
         super().__init__()
 
         # initialize the GUI
@@ -82,33 +47,8 @@ class MainWindow(QMainWindow):
         self.image_subscriber.new_image.connect(self.update_image)
         self.image_subscriber.start()
 
-        # start moveit python interface
-        robot_ip = "" # not applicable for fake hardware
-        use_gripper = "true" 
-        use_fake_hardware = "true" 
-
-        moveit_config = (
-            MoveItConfigsBuilder(robot_name="panda", package_name="franka_robotiq_moveit_config")
-            .robot_description(file_path=get_package_share_directory("franka_robotiq_description") + "/urdf/robot.urdf.xacro",
-                mappings={
-                    "robot_ip": robot_ip,
-                    "robotiq_gripper": use_gripper,
-                    "use_fake_hardware": use_fake_hardware,
-                    })
-            .robot_description_semantic("config/panda.srdf.xacro", 
-                mappings={
-                    "robotiq_gripper": use_gripper,
-                    })
-            .trajectory_execution("config/moveit_controllers.yaml")
-            .moveit_cpp(
-                file_path=get_package_share_directory("panda_motion_planning_demos")
-                + "/config/moveit_cpp.yaml"
-            )
-            .to_moveit_configs()
-            ).to_dict()
-
-        self.panda = MoveItPy(config_dict=moveit_config)
-        self.panda_arm = self.panda.get_planning_component("panda_arm")        
+        # dm env to manage execution and trajectory logging
+        self.env = env
 
         # application parameters
         self.mode = "pick"
@@ -298,76 +238,6 @@ class MainWindow(QMainWindow):
         self.label_image.setPixmap(pixmap)
     
 
-    def pick(self, world_coords):
-        pick_pose_msg = PoseStamped()
-        pick_pose_msg.header.frame_id = "panda_link0"
-        pick_pose_msg.pose.orientation.x = 0.9238795
-        pick_pose_msg.pose.orientation.y = -0.3826834
-        pick_pose_msg.pose.orientation.z = 0.0
-        pick_pose_msg.pose.orientation.w = 0.0
-        pick_pose_msg.pose.position.x = world_coords[0]
-        pick_pose_msg.pose.position.y = world_coords[1]
-        pick_pose_msg.pose.position.z = world_coords[2]
-        
-        # prepick pose
-        panda_arm.set_start_state_to_current_state()
-        pre_pick_pose_msg = deepcopy(pick_pose_msg)
-        pre_pick_pose_msg.pose.position.z += 0.1
-        panda_arm.set_goal_state(pose_stamped_msg=pre_pick_pose_msg, pose_link="panda_link8")
-        plan_and_execute(panda, panda_arm, logger, sleep_time=3.0)
-
-        # pick pose
-        panda_arm.set_start_state_to_current_state()
-        panda_arm.set_goal_state(pose_stamped_msg=pick_pose_msg, pose_link="panda_link8")
-        plan_and_execute(panda, panda_arm, logger, sleep_time=3.0)
-
-        # close gripper
-        gripper_client.close_gripper()
-        time.sleep(2.0)
-        
-        # raise arm
-        panda_arm.set_start_state_to_current_state()
-        pre_pick_pose_msg.pose.position.z += 0.2
-        panda_arm.set_goal_state(pose_stamped_msg=pre_pick_pose_msg, pose_link="panda_link8")
-        plan_and_execute(panda, panda_arm, logger, sleep_time=3.0)
-
-        self.mode = "place"
-
-    def place(self, world_coords):
-        place_pose_msg = PoseStamped()
-        place_pose_msg.header.frame_id = "panda_link0"
-        place_pose_msg.pose.orientation.x = 0.9238795
-        place_pose_msg.pose.orientation.y = -0.3826834
-        place_pose_msg.pose.orientation.z = 0.0
-        place_pose_msg.pose.orientation.w = 0.0
-        place_pose_msg.pose.position.x = world_coords[0]
-        place_pose_msg.pose.position.y = world_coords[1]
-        place_pose_msg.pose.position.z = world_coords[2]
-        
-        # preplace pose
-        panda_arm.set_start_state_to_current_state()
-        pre_place_pose_msg = deepcopy(place_pose_msg)
-        pre_place_pose_msg.pose.position.z += 0.1
-        panda_arm.set_goal_state(pose_stamped_msg=pre_place_pose_msg, pose_link="panda_link8")
-        plan_and_execute(panda, panda_arm, logger, sleep_time=3.0)
-
-        # place pose
-        panda_arm.set_start_state_to_current_state()
-        panda_arm.set_goal_state(pose_stamped_msg=place_pose_msg, pose_link="panda_link8")
-        plan_and_execute(panda, panda_arm, logger, sleep_time=3.0)
-
-        # open gripper
-        gripper_client.open_gripper()
-        time.sleep(2.0)
-        
-        # raise arm
-        panda_arm.set_start_state_to_current_state()
-        pre_place_pose_msg.pose.position.z += 0.2
-        panda_arm.set_goal_state(pose_stamped_msg=pre_place_pose_msg, pose_link="panda_link8")
-        plan_and_execute(panda, panda_arm, logger, sleep_time=3.0)
-
-        self.mode = "pick"
-    
     def executeMotionPlan(self):
         
         # map pixel coords to world coords
@@ -388,15 +258,20 @@ class MainWindow(QMainWindow):
         world_coords = world_coords[:3] / world_coords[3]
 
         if self.mode == "pick":
-            self.pick(world_coords)
+            self.env.step(world_coords)
         else:
-            self.place(world_coords)
+            self.env.step(world_coords)
 
 
 def main(args=None):
-    app = QApplication(sys.argv)
-    ex = MainWindow()
-    sys.exit(app.exec())
+    env = FrankaTable()
+    os.makedirs(os.path.join(os.path.dirname(__file__), "data"), exist_ok=True)
+    with envlogger.EnvLogger(
+            env, 
+            data_directory=os.path.join(os.path.dirname(__file__), "data")) as env:
+        app = QApplication(sys.argv)
+        ex = MainWindow(env)
+        sys.exit(app.exec())
 
 if __name__ == '__main__':
     main()
