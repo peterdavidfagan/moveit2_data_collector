@@ -66,6 +66,7 @@ class MainWindow(QMainWindow):
         horizontal_panes = QHBoxLayout()
         left_pane = QVBoxLayout()
         right_pane = QVBoxLayout()
+        right_pane.setAlignment(Qt.AlignmentFlag.AlignTop)
         right_pane.setSpacing(2)
 
         # Left Pane
