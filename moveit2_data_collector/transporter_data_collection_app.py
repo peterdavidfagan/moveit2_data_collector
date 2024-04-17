@@ -3,6 +3,7 @@ import sys
 import math
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+from scipy.interpolate import griddata
 import scipy.spatial.transform as st
 from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QWidget, QFileDialog
 from PyQt6.QtGui import QPixmap, QImage, QMouseEvent
@@ -10,29 +11,127 @@ from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 
 import rclpy
 from rclpy.node import Node
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSHistoryPolicy, QoSReliabilityPolicy
+
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
+import message_filters
 
 import cv2
 
-from robot_workspaces.mj_transporter_franka_table import FrankaTable
+from robot_workspaces.franka_table import FrankaTable
 import envlogger
 
-class ImageSubscriber(QThread):
-    new_image = pyqtSignal(object)
 
-    def __init__(self):
+class ImageSubscriber(QThread):
+    new_rgb_image = pyqtSignal(object)
+    new_depth_image = pyqtSignal(object)
+
+    def __init__(self, rgb_topic, depth_topic):
         super().__init__()
         self.cv_bridge = CvBridge()
+        self.camera_callback_group = ReentrantCallbackGroup()
+        self.camera_qos_profile = QoSProfile(
+                depth=1,
+                history=QoSHistoryPolicy(rclpy.qos.HistoryPolicy.KEEP_LAST),
+                reliability=QoSReliabilityPolicy(rclpy.qos.ReliabilityPolicy.RELIABLE),
+            )
+        self.rgb_topic = rgb_topic
+        self.depth_topic = depth_topic
 
     def run(self):
-        node = rclpy.create_node('image_subscriber')
-        subscription = node.create_subscription(Image, 'overhead_camera', self.image_callback, 10)
-        rclpy.spin(node)
+        self.node = rclpy.create_node('image_subscriber')
 
-    def image_callback(self, msg):
-        rgb_img = self.cv_bridge.imgmsg_to_cv2(msg, "rgb8")
-        self.new_image.emit(rgb_img)
+        self.rgb_image_sub = message_filters.Subscriber(
+            self.node,
+            Image,
+            self.rgb_topic,
+            callback_group=self.camera_callback_group,
+        )
+
+        self.depth_image_sub = message_filters.Subscriber(
+            self.node,
+            Image,
+            self.depth_topic,
+            callback_group=self.camera_callback_group,
+        )
+
+        self.sync = message_filters.ApproximateTimeSynchronizer(
+            [self.rgb_image_sub, self.depth_image_sub],
+            10,
+            0.1,
+            )
+        self.sync.registerCallback(self.image_callback)
+        self.executor = rclpy.executors.MultiThreadedExecutor()
+        self.executor.add_node(self.node)
+        self.executor.spin()
+       
+    def update_rgb_topic(self, camera_topic):
+        self.rgb_topic = camera_topic
+        if (self.rgb_topic is not None) and (self.depth_topic is not None):
+            self.executor.remove_node(self.node)
+            self.node.destroy_subscription(self.rgb_image_sub)
+            self.rgb_image_sub = message_filters.Subscriber(
+                node,
+                Image,
+                self.rgb_topic,
+                callback_group=self.camera_callback_group,
+            )
+            self.sync = message_filters.ApproximateTimeSynchronizer(
+                [self.rgb_image_sub, self.depth_image_sub],
+                10,
+                0.1,
+                )
+            self.sync.registerCallback(self.image_callback)
+            self.executor.add_node(self.node)
+            self.executor.wake()
+
+    def update_depth_topic(self, camera_topic):
+        self.depth_topic = camera_topic
+        if (self.rgb_topic is not None) and (self.depth_topic is not None):
+            self.executor.remove_node(self.node)
+            self.node.destroy_subscription(self.rgb_image_sub)
+            self.depth_image_sub = message_filters.Subscriber(
+                node,
+                Image,
+                self.depth_topic,
+                callback_group=self.camera_callback_group,
+            )
+            self.sync = message_filters.ApproximateTimeSynchronizer(
+                [self.rgb_image_sub, self.depth_image_sub],
+                10,
+                0.1,
+                )
+            self.sync.registerCallback(self.image_callback)
+            self.executor.add_node(self.node)
+            self.executor.wake()
+
+    def image_callback(self, rgb, depth):
+        rgb_img = self.cv_bridge.imgmsg_to_cv2(rgb, "rgb8")
+        self.new_rgb_image.emit(rgb_img) 
+
+        depth_img = self.cv_bridge.imgmsg_to_cv2(depth, "32FC1") # check encoding
+        
+        # # inpaint nan and inf values in depth image
+        # nan_mask = np.isnan(depth_img)
+        # inf_mask = np.isinf(depth_img)
+        # mask = np.logical_or(nan_mask, inf_mask)
+        # mask = cv2.UMat(mask.astype(np.uint8))
+
+        # # Scale to keep as float, but has to be in bounds -1:1 to keep opencv happy.
+        # scale = np.ma.masked_invalid(np.abs(depth_img)).max()
+        # depth_img = depth_img.astype(np.float32) / scale  # Has to be float32, 64 not supported.
+        # depth_img = cv2.inpaint(depth_img, mask, 1, cv2.INPAINT_NS)
+
+        # # interpolate remaining nan values with nearest neighbor
+        # depth_img = np.array(depth_img.get())
+        # y, x = np.where(~np.isnan(depth_img))
+        # x_range, y_range = np.meshgrid(np.arange(depth_img.shape[1]), np.arange(depth_img.shape[0]))
+        # depth_img = griddata((x, y), depth_img[y, x], (x_range, y_range), method='nearest')
+        # depth_img = depth_img * scale
+
+        self.new_depth_image.emit(depth_img)
 
 
 class MainWindow(QMainWindow):
@@ -43,9 +142,7 @@ class MainWindow(QMainWindow):
         self.initUI()
 
         # start ROS image subscriber
-        self.image_subscriber = ImageSubscriber()
-        self.image_subscriber.new_image.connect(self.update_image)
-        self.image_subscriber.start()
+        self.image_subscriber = None
 
         # environment for recording data
         self.env = env
@@ -65,6 +162,8 @@ class MainWindow(QMainWindow):
         main_screen = QVBoxLayout(central_widget)
         horizontal_panes = QHBoxLayout()
         left_pane = QVBoxLayout()
+        left_pane.setAlignment(Qt.AlignmentFlag.AlignTop)
+        left_pane.setSpacing(2)
         right_pane = QVBoxLayout()
         right_pane.setAlignment(Qt.AlignmentFlag.AlignTop)
         right_pane.setSpacing(2)
@@ -73,10 +172,31 @@ class MainWindow(QMainWindow):
         self.label_image = QLabel()
         self.label_image.mousePressEvent = self.update_pixel_coordinates
         left_pane.addWidget(self.label_image)
+        self.depth_label_image = QLabel()
+        left_pane.addWidget(self.depth_label_image)
         horizontal_panes.addLayout(left_pane)
 
-
         # Right Pane
+        self.rgb_topic_label = QLabel("RGB Topic:")
+        self.rgb_topic_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.rgb_topic_label.setFixedHeight(20)
+
+        self.rgb_topic_name = QLineEdit()
+        self.rgb_topic_name.setPlaceholderText("Enter image topic")
+        self.rgb_topic_name.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.rgb_topic_name.setFixedHeight(20)
+        self.rgb_topic_name.returnPressed.connect(self.update_rgb_topic)
+
+        self.depth_topic_label = QLabel("Depth Topic:")
+        self.depth_topic_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.depth_topic_label.setFixedHeight(20)
+
+        self.depth_topic_name = QLineEdit()
+        self.depth_topic_name.setPlaceholderText("Enter image topic")
+        self.depth_topic_name.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.depth_topic_name.setFixedHeight(20)
+        self.depth_topic_name.returnPressed.connect(self.update_depth_topic)
+
         # table height input
         self.label_table_height = QLabel("Enter Table Height Offset:")
         self.label_table_height.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -140,6 +260,10 @@ class MainWindow(QMainWindow):
         self.reset_button.setFixedHeight(20)
 
         # add all widgets to right pane
+        right_pane.addWidget(self.rgb_topic_label)
+        right_pane.addWidget(self.rgb_topic_name)
+        right_pane.addWidget(self.depth_topic_label)
+        right_pane.addWidget(self.depth_topic_name)
         right_pane.addWidget(self.label_table_height)
         right_pane.addWidget(self.line_edit)
         right_pane.addWidget(self.label_pixel_coords)
@@ -158,6 +282,29 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle('Transporter Network Data Collection')
         self.show()
+
+    def update_rgb_topic(self):
+        if self.image_subscriber is not None:
+            self.image_subscriber.update_rgb_topic(self.rgb_topic_name.text())
+        elif self.depth_topic_name.text()!="":
+            self.image_subscriber = ImageSubscriber(self.rgb_topic_name.text(), self.depth_topic_name.text())
+            self.image_subscriber.new_rgb_image.connect(self.update_image)
+            self.image_subscriber.new_depth_image.connect(self.update_depth_image)
+            self.image_subscriber.start()
+        else:
+            print("both topics need to be set")
+
+    def update_depth_topic(self):
+        if self.image_subscriber is not None:
+            self.image_subscriber.update_depth_topic(self.depth_topic_name.text())
+        elif self.rgb_topic_name.text()!="":
+            self.image_subscriber = ImageSubscriber(self.rgb_topic_name.text(), self.depth_topic_name.text())
+            self.image_subscriber.new_rgb_image.connect(self.update_image)
+            self.image_subscriber.new_depth_image.connect(self.update_depth_image)
+            self.image_subscriber.start()
+        else:
+            print("both topics need to be set")
+             
 
     def update_pixel_coordinates(self, event: QMouseEvent):
         point = event.pos()
@@ -222,7 +369,7 @@ class MainWindow(QMainWindow):
 
     def update_image(self, rgb_img):
         # store the current image
-        self.current_image = rgb_img.copy() 
+        self.rgb_image = rgb_img.copy() 
 
         # overlay a line centred at pixel coord with gripper orientation
         x = int(self.x)
@@ -232,16 +379,29 @@ class MainWindow(QMainWindow):
 
         # display the image
         height, width, channel = rgb_img.shape
-        bytes_per_line = channel * width
         qimg = QImage(rgb_img.data, width, height, QImage.Format(13))
         pixmap = QPixmap.fromImage(qimg)
         self.label_image.setPixmap(pixmap)
-    
+
+    def update_depth_image(self, depth_img):
+        # store the current image
+        self.depth_image = depth_img.copy() 
+        
+        # create grayscale image
+        img = depth_img.astype(np.uint8)
+
+        # display the image
+        height, width = img.shape
+        qimg = QImage(img.data, width, height, width*2,  QImage.Format(24))
+        pixmap = QPixmap.fromImage(qimg)
+        self.depth_label_image.setPixmap(pixmap)
 
     def env_step(self):
         # map pixel coords to world coords
         ## TODO: get depth value from camera 
-        depth_val = 0.4
+        print(self.depth_image)
+        depth_val = np.array(self.depth_image)[self.x, self.y]
+        print(depth_val)
 
         ## convert current pixels coordinates to camera frame coordinates
         pixel_coords = np.array([self.x, self.y])
@@ -266,7 +426,7 @@ class MainWindow(QMainWindow):
             self.env.step(pose)
     
     def env_reset(self):
-        self.env.set_observation(self.current_image)
+        self.env.set_observation(self.rgb_image)
         self.env.reset()
 
 

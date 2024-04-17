@@ -59,7 +59,7 @@ class GripperClient(Node):
         self.gripper_action_client = ActionClient(
             self,
             GripperCommand, 
-            "/robotiq_position_controller/gripper_cmd"
+            "/robotiq/robotiq_position_controller/gripper_cmd"
         )
     
     def close_gripper(self):
@@ -168,7 +168,7 @@ class FrankaTable(dm_env.Environment):
         # prepick pose
         self.panda_arm.set_start_state_to_current_state()
         pre_pick_pose_msg = deepcopy(pick_pose_msg)
-        pre_pick_pose_msg.pose.position.z += 0.1
+        pre_pick_pose_msg.pose.position.z += 0.05
         self.panda_arm.set_goal_state(pose_stamped_msg=pre_pick_pose_msg, pose_link="panda_link8")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=3.0)
 
@@ -203,7 +203,7 @@ class FrankaTable(dm_env.Environment):
         # preplace pose
         self.panda_arm.set_start_state_to_current_state()
         pre_place_pose_msg = deepcopy(place_pose_msg)
-        pre_place_pose_msg.pose.position.z += 0.1
+        pre_place_pose_msg.pose.position.z += 0.05
         self.panda_arm.set_goal_state(pose_stamped_msg=pre_place_pose_msg, pose_link="panda_link8")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=3.0)
 
