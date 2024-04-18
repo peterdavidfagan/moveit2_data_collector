@@ -5,9 +5,9 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from scipy.interpolate import griddata
 import scipy.spatial.transform as st
-from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QWidget, QFileDialog
-from PyQt6.QtGui import QPixmap, QImage, QMouseEvent
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt6.QtWidgets import *
+from PyQt6.QtGui import *
+from PyQt6.QtCore import *
 
 import rclpy
 from rclpy.node import Node
@@ -23,6 +23,34 @@ import cv2
 from robot_workspaces.franka_table import FrankaTable
 import envlogger
 
+
+class Worker(QRunnable):
+    '''
+    Worker thread
+
+    Inherits from QRunnable to handler worker thread setup, signals and wrap-up.
+
+    :param callback: The function callback to run on this worker thread. Supplied args and
+                     kwargs will be passed through to the runner.
+    :type callback: function
+    :param args: Arguments to pass to the callback function
+    :param kwargs: Keywords to pass to the callback function
+
+    '''
+
+    def __init__(self, fn, *args, **kwargs):
+        super(Worker, self).__init__()
+        # Store constructor arguments (re-used for processing)
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+
+    @pyqtSlot()
+    def run(self):
+        '''
+        Initialise the runner function with passed args, kwargs.
+        '''
+        self.fn(*self.args, **self.kwargs)
 
 class ImageSubscriber(QThread):
     new_rgb_image = pyqtSignal(object)
@@ -101,7 +129,7 @@ class ImageSubscriber(QThread):
             self.sync = message_filters.ApproximateTimeSynchronizer(
                 [self.rgb_image_sub, self.depth_image_sub],
                 10,
-                0.1,
+                0.5,
                 )
             self.sync.registerCallback(self.image_callback)
             self.executor.add_node(self.node)
@@ -112,25 +140,6 @@ class ImageSubscriber(QThread):
         self.new_rgb_image.emit(rgb_img) 
 
         depth_img = self.cv_bridge.imgmsg_to_cv2(depth, "32FC1") # check encoding
-        
-        # # inpaint nan and inf values in depth image
-        # nan_mask = np.isnan(depth_img)
-        # inf_mask = np.isinf(depth_img)
-        # mask = np.logical_or(nan_mask, inf_mask)
-        # mask = cv2.UMat(mask.astype(np.uint8))
-
-        # # Scale to keep as float, but has to be in bounds -1:1 to keep opencv happy.
-        # scale = np.ma.masked_invalid(np.abs(depth_img)).max()
-        # depth_img = depth_img.astype(np.float32) / scale  # Has to be float32, 64 not supported.
-        # depth_img = cv2.inpaint(depth_img, mask, 1, cv2.INPAINT_NS)
-
-        # # interpolate remaining nan values with nearest neighbor
-        # depth_img = np.array(depth_img.get())
-        # y, x = np.where(~np.isnan(depth_img))
-        # x_range, y_range = np.meshgrid(np.arange(depth_img.shape[1]), np.arange(depth_img.shape[0]))
-        # depth_img = griddata((x, y), depth_img[y, x], (x_range, y_range), method='nearest')
-        # depth_img = depth_img * scale
-
         self.new_depth_image.emit(depth_img)
 
 
@@ -146,6 +155,7 @@ class MainWindow(QMainWindow):
 
         # environment for recording data
         self.env = env
+        self.threadpool = QThreadPool()
 
         # GUI application parameters
         self.mode = "pick"
@@ -172,8 +182,6 @@ class MainWindow(QMainWindow):
         self.label_image = QLabel()
         self.label_image.mousePressEvent = self.update_pixel_coordinates
         left_pane.addWidget(self.label_image)
-        self.depth_label_image = QLabel()
-        left_pane.addWidget(self.depth_label_image)
         horizontal_panes.addLayout(left_pane)
 
         # Right Pane
@@ -304,7 +312,6 @@ class MainWindow(QMainWindow):
             self.image_subscriber.start()
         else:
             print("both topics need to be set")
-             
 
     def update_pixel_coordinates(self, event: QMouseEvent):
         point = event.pos()
@@ -336,8 +343,8 @@ class MainWindow(QMainWindow):
             quaternion = data["extrinsic_params"]["quaternion"]
             rotation = st.Rotation.from_quat(quaternion).as_matrix()
             self.camera_extrinsics = np.eye(4)
-            self.camera_extrinsics[:3, :3] = rotation
-            self.camera_extrinsics[:3, 3] = translation
+            self.camera_extrinsics[:3, :3] = rotation.T
+            self.camera_extrinsics[:3, 3] = -rotation.T @ translation
             
             print("Camera Intrinsics:", self.camera_intrinsics)
             print("Camera Extrinsics:", self.camera_extrinsics)
@@ -345,8 +352,8 @@ class MainWindow(QMainWindow):
 
     def update_application_params(self):
         self.table_height = float(self.line_edit.text())  # Convert input text to float 
-        self.x = float(self.x_edit.text())
-        self.y = float(self.y_edit.text())
+        self.x = int(self.x_edit.text())
+        self.y = int(self.y_edit.text())
         self.gripper_rot_z = float(self.gripper_rot_z_edit.text())
         
         print("Updating Table Height:", self.table_height)
@@ -383,31 +390,41 @@ class MainWindow(QMainWindow):
         pixmap = QPixmap.fromImage(qimg)
         self.label_image.setPixmap(pixmap)
 
-    def update_depth_image(self, depth_img):
-        # store the current image
+    def update_depth_image(self, depth_img):        
         self.depth_image = depth_img.copy() 
-        
-        # create grayscale image
-        img = depth_img.astype(np.uint8)
-
-        # display the image
-        height, width = img.shape
-        qimg = QImage(img.data, width, height, width*2,  QImage.Format(24))
-        pixmap = QPixmap.fromImage(qimg)
-        self.depth_label_image.setPixmap(pixmap)
 
     def env_step(self):
         # map pixel coords to world coords
-        ## TODO: get depth value from camera 
-        print(self.depth_image)
-        depth_val = np.array(self.depth_image)[self.x, self.y]
+
+        # inpaint nan and inf values in depth image
+        depth_img = self.depth_image.copy()
+        nan_mask = np.isnan(depth_img)
+        inf_mask = np.isinf(depth_img)
+        mask = np.logical_or(nan_mask, inf_mask)
+        mask = cv2.UMat(mask.astype(np.uint8))
+
+        # Scale to keep as float, but has to be in bounds -1:1 to keep opencv happy.
+        scale = np.ma.masked_invalid(np.abs(depth_img)).max()
+        depth_img = depth_img.astype(np.float32) / scale  # Has to be float32, 64 not supported.
+        depth_img = cv2.inpaint(depth_img, mask, 1, cv2.INPAINT_NS)
+
+        # interpolate remaining nan values with nearest neighbor
+        depth_img = np.array(depth_img.get())
+        y, x = np.where(~np.isnan(depth_img))
+        x_range, y_range = np.meshgrid(np.arange(depth_img.shape[1]), np.arange(depth_img.shape[0]))
+        depth_img = griddata((x, y), depth_img[y, x], (x_range, y_range), method='nearest')
+        depth_img = depth_img * scale 
+        depth_val = depth_img[self.x, self.y]
+        print(depth_img.shape)
         print(depth_val)
 
         ## convert current pixels coordinates to camera frame coordinates
         pixel_coords = np.array([self.x, self.y])
+        print(pixel_coords)
         image_coords = np.concatenate([pixel_coords, np.ones(1)])
         camera_coords =  np.linalg.inv(self.camera_intrinsics) @ image_coords
-        camera_coords *= -depth_val # negative sign due to mujoco camera convention (for debug only!)
+        camera_coords *= depth_val # negate depth when using mujoco camera convention
+        print(camera_coords)
 
         ## convert camera coordinates to world coordinates
         camera_coords = np.concatenate([camera_coords, np.ones(1)])
@@ -416,14 +433,16 @@ class MainWindow(QMainWindow):
 
         print("World Coordinates:", world_coords)
         
-        world_coords = np.array([0.25, 0.25, 0.5]) # hardcode while debugging
+        #world_coords = np.array([0.5, 0.0, 0.2]) # hardcode while debugging
         quat = R.from_euler('xyz', [0, 180, self.gripper_rot_z], degrees=True).as_quat()
         pose = np.concatenate([world_coords, quat])
 
         if self.mode == "pick":
-            self.env.step(pose)
+            worker = Worker(self.env.step, pose)
         else:
-            self.env.step(pose)
+            worker = Worker(self.env.step, pose)
+        
+        self.threadpool.start(worker)
     
     def env_reset(self):
         self.env.set_observation(self.rgb_image)

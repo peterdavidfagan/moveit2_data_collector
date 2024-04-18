@@ -59,7 +59,7 @@ class GripperClient(Node):
         self.gripper_action_client = ActionClient(
             self,
             GripperCommand, 
-            "/robotiq/robotiq_position_controller/gripper_cmd"
+            "/robotiq/robotiq_gripper_controller/gripper_cmd"
         )
     
     def close_gripper(self):
@@ -116,6 +116,10 @@ class FrankaTable(dm_env.Environment):
         self.current_observation = None
 
     def reset(self) -> dm_env.TimeStep:
+        self.panda_arm.set_start_state_to_current_state()
+        self.panda_arm.set_goal_state(configuration_name="ready")
+        plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
+        self.gripper_client.open_gripper()
         return dm_env.TimeStep(
                 step_type=dm_env.StepType.FIRST,
                 reward=0.0,
@@ -152,7 +156,7 @@ class FrankaTable(dm_env.Environment):
                 )
 
     def close(self):
-        raise NotImplementedError
+        print("closing")
 
     def pick(self, pose):
         pick_pose_msg = PoseStamped()
@@ -168,24 +172,24 @@ class FrankaTable(dm_env.Environment):
         # prepick pose
         self.panda_arm.set_start_state_to_current_state()
         pre_pick_pose_msg = deepcopy(pick_pose_msg)
-        pre_pick_pose_msg.pose.position.z += 0.05
+        pre_pick_pose_msg.pose.position.z += 0.6
         self.panda_arm.set_goal_state(pose_stamped_msg=pre_pick_pose_msg, pose_link="panda_link8")
-        plan_and_execute(self.panda, self.panda_arm, sleep_time=3.0)
+        plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
 
         # pick pose
         self.panda_arm.set_start_state_to_current_state()
+        pick_pose_msg.pose.position.z += 0.2
         self.panda_arm.set_goal_state(pose_stamped_msg=pick_pose_msg, pose_link="panda_link8")
-        plan_and_execute(self.panda, self.panda_arm, sleep_time=3.0)
+        plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
 
         # close gripper
         self.gripper_client.close_gripper()
-        time.sleep(2.0)
+        time.sleep(3.0)
         
         # raise arm
         self.panda_arm.set_start_state_to_current_state()
-        pre_pick_pose_msg.pose.position.z += 0.2
-        self.panda_arm.set_goal_state(pose_stamped_msg=pre_pick_pose_msg, pose_link="panda_link8")
-        plan_and_execute(self.panda, self.panda_arm, sleep_time=3.0)
+        self.panda_arm.set_goal_state(configuration_name="ready")
+        plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
 
         self.mode = "place"
 
@@ -203,23 +207,24 @@ class FrankaTable(dm_env.Environment):
         # preplace pose
         self.panda_arm.set_start_state_to_current_state()
         pre_place_pose_msg = deepcopy(place_pose_msg)
-        pre_place_pose_msg.pose.position.z += 0.05
+        pre_place_pose_msg.pose.position.z += 0.6
         self.panda_arm.set_goal_state(pose_stamped_msg=pre_place_pose_msg, pose_link="panda_link8")
-        plan_and_execute(self.panda, self.panda_arm, sleep_time=3.0)
+        plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
 
         # place pose
         self.panda_arm.set_start_state_to_current_state()
+        place_pose_msg.pose.position.z += 0.2
         self.panda_arm.set_goal_state(pose_stamped_msg=place_pose_msg, pose_link="panda_link8")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=3.0)
 
         # open gripper
         self.gripper_client.open_gripper()
-        time.sleep(2.0)
+        time.sleep(3.0)
         
         # raise arm
+        # raise arm
         self.panda_arm.set_start_state_to_current_state()
-        pre_place_pose_msg.pose.position.z += 0.2
-        self.panda_arm.set_goal_state(pose_stamped_msg=pre_place_pose_msg, pose_link="panda_link8")
+        self.panda_arm.set_goal_state(configuration_name="ready")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=3.0)
 
         self.mode = "pick"
