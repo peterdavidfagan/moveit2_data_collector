@@ -1,6 +1,7 @@
 import os
 import sys
 import argparse
+import yaml
 import math
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -325,31 +326,34 @@ class MainWindow(QMainWindow):
         """
         Reads camera calibration parameters from a json file
         """
-        fileName, _ = QFileDialog.getOpenFileName(self,"QFileDialog.getOpenFileName()", "","All Files (*);;Python Files (*.py)")
+        fileName, _ = QFileDialog.getOpenFileName(self, "Open Application Parameters File", "", "YAML Files (*.yaml)")
         if fileName:
-            print("File selected:", fileName)
-            import json
-            with open(fileName) as f:
-                data = json.load(f)
+            with open(file_path, "r") as file:
+                self.config = yaml.load(file, Loader=yaml.FullLoader)
                 
             # assign camera intrinsics
-            fx = data["intrinsic_params"]["fx"]
-            fy = data["intrinsic_params"]["fy"]
-            cx = data["intrinsic_params"]["cx"]
-            cy = data["intrinsic_params"]["cy"]
+            fx = self.config["camera"]["intrinsics"]["fx"]
+            fy = self.config["camera"]["intrinsics"]["fy"]
+            cx = self.config["camera"]["intrinsics"]["cx"]
+            cy = self.config["camera"]["intrinsics"]["cy"]
             self.camera_intrinsics = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
             
             # assign camera extrinsics
-            translation = data["extrinsic_params"]["translation"]
-            quaternion = data["extrinsic_params"]["quaternion"]
+            translation = [
+                self.config["camera"]["extrinsics"]["x"],
+                self.config["camera"]["extrinsics"]["y"],
+                self.config["camera"]["extrinsics"]["z"],
+                ]
+            quaternion = [
+                self.config["camera"]["extrinsics"]["qw"],
+                self.config["camera"]["extrinsics"]["qx"],
+                self.config["camera"]["extrinsics"]["qy"],
+                self.config["camera"]["extrinsics"]["qz"],
+                ]
             rotation = st.Rotation.from_quat(quaternion).as_matrix()
             self.camera_extrinsics = np.eye(4)
             self.camera_extrinsics[:3, :3] = rotation.T
             self.camera_extrinsics[:3, 3] = -rotation.T @ translation
-            
-            print("Camera Intrinsics:", self.camera_intrinsics)
-            print("Camera Extrinsics:", self.camera_extrinsics)
-
 
     def update_application_params(self):
         self.table_height = float(self.line_edit.text())  # Convert input text to float 
