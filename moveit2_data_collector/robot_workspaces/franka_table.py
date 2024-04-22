@@ -1,7 +1,5 @@
 """
 A basic dm environment for transporter data collection on the Franka robot.
-
-Important: still being implemented not ready for use.
 """
 import time
 from typing import Dict
@@ -79,9 +77,7 @@ class GripperClient(Node):
 
 class FrankaTable(dm_env.Environment):
     """
-    This dm_env is intended to be used in conjunction with PyQt data collection application.
-    The management of ROS communication is handled by the data collection application.
-    This application is intended to make data collection compatible with env_logger.
+    This dm_env is intended to be used in conjunction with PyQt data collection application. This environment abstraction is intended to make data collection compatible with env_logger.
     """
 
     def __init__(self, args):
