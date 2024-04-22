@@ -1,5 +1,6 @@
 import os
 import sys
+import argparse
 import math
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -450,8 +451,15 @@ class MainWindow(QMainWindow):
 
 
 def main(args=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--robot_ip", default="192.168.106.99", required=False)
+    parser.add_argument("--use_fake_hardware", default="false", required=False)
+    parser.add_argument("--use_gripper", default="true", required=False)
+    parser.add_argument("--gripper_controller", default="/robotiq/robotiq_gripper_controller/gripper_cmd", required=False)
+    args = parser.parse_args()
+    
     rclpy.init(args=None)
-    env = FrankaTable()
+    env = FrankaTable(args)
     os.makedirs(os.path.join(os.path.dirname(__file__), "data"), exist_ok=True)
     with envlogger.EnvLogger(
             env, 

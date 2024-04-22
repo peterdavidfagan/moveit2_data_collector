@@ -52,14 +52,15 @@ def plan_and_execute(
 
     time.sleep(sleep_time)
 
+
 class GripperClient(Node):
 
-    def __init__(self):
+    def __init__(self, gripper_controller):
         super().__init__("gripper_client")
         self.gripper_action_client = ActionClient(
             self,
             GripperCommand, 
-            "/robotiq/robotiq_gripper_controller/gripper_cmd"
+            gripper_controller,
         )
     
     def close_gripper(self):
@@ -83,10 +84,10 @@ class FrankaTable(dm_env.Environment):
     This application is intended to make data collection compatible with env_logger.
     """
 
-    def __init__(self):
-        robot_ip = "" # not applicable for fake hardware
-        use_gripper = "true" 
-        use_fake_hardware = "true" 
+    def __init__(self, args):
+        robot_ip = args.robot_ip
+        use_gripper = args.use_gripper
+        use_fake_hardware = args.use_fake_hardware
         
         moveit_config = (
             MoveItConfigsBuilder(robot_name="panda", package_name="franka_robotiq_moveit_config")
@@ -110,7 +111,7 @@ class FrankaTable(dm_env.Environment):
 
         self.panda = MoveItPy(config_dict=moveit_config)
         self.panda_arm = self.panda.get_planning_component("panda_arm") 
-        self.gripper_client = GripperClient()
+        self.gripper_client = GripperClient(args.gripper_controller)
 
         self.mode="pick"
         self.current_observation = None
