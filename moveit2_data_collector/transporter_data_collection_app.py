@@ -360,11 +360,6 @@ class MainWindow(QMainWindow):
         self.x = int(self.x_edit.text())
         self.y = int(self.y_edit.text())
         self.gripper_rot_z = float(self.gripper_rot_z_edit.text())
-        
-        print("Updating Table Height:", self.table_height)
-        print("Updating X Coordinate:", self.x)
-        print("Updating Y Coordinate:", self.y)     
-        print("Updating Gripper Rotation:", self.gripper_rot_z)
 
     def overlay_gripper_line(self, image, center, length, angle_degrees, color=(255, 0, 0), thickness=3):
         # Convert angle from degrees to radians
@@ -400,7 +395,6 @@ class MainWindow(QMainWindow):
 
     def env_step(self):
         # map pixel coords to world coords
-
         # inpaint nan and inf values in depth image
         depth_img = self.depth_image.copy()
         nan_mask = np.isnan(depth_img)
