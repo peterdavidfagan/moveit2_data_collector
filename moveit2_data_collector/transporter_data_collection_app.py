@@ -154,6 +154,8 @@ class MainWindow(QMainWindow):
 
         # start ROS image subscriber
         self.image_subscriber = None
+        self.image_topic_name=""
+        self.depth_topic_name=""
 
         # environment for recording data
         self.env = env
@@ -293,22 +295,32 @@ class MainWindow(QMainWindow):
         self.setWindowTitle('Transporter Network Data Collection')
         self.show()
 
-    def update_rgb_topic(self):
+    def update_rgb_topic(self, text=None):
+        if text is None:
+            self.image_topic_name = self.rgb_topic_name.text()
+        else:
+            self.image_topic_name = text
+
         if self.image_subscriber is not None:
-            self.image_subscriber.update_rgb_topic(self.rgb_topic_name.text())
-        elif self.depth_topic_name.text()!="":
-            self.image_subscriber = ImageSubscriber(self.rgb_topic_name.text(), self.depth_topic_name.text())
+            self.image_subscriber.update_rgb_topic(self.image_topic_name)
+        elif self.depth_topic_name!="":
+            self.image_subscriber = ImageSubscriber(self.image_topic_name, self.depth_topic_name)
             self.image_subscriber.new_rgb_image.connect(self.update_image)
             self.image_subscriber.new_depth_image.connect(self.update_depth_image)
             self.image_subscriber.start()
         else:
             print("both topics need to be set")
 
-    def update_depth_topic(self):
+    def update_depth_topic(self, text=None):
+        if text is None:
+            self.depth_topic_name = self.depth_topic_name.text()
+        else:
+            self.depth_topic_name = text
+
         if self.image_subscriber is not None:
-            self.image_subscriber.update_depth_topic(self.depth_topic_name.text())
+            self.image_subscriber.update_depth_topic(self.depth_topic_name)
         elif self.rgb_topic_name.text()!="":
-            self.image_subscriber = ImageSubscriber(self.rgb_topic_name.text(), self.depth_topic_name.text())
+            self.image_subscriber = ImageSubscriber(self.image_topic_name, self.depth_topic_name)
             self.image_subscriber.new_rgb_image.connect(self.update_image)
             self.image_subscriber.new_depth_image.connect(self.update_depth_image)
             self.image_subscriber.start()
@@ -331,6 +343,13 @@ class MainWindow(QMainWindow):
             with open(file_path, "r") as file:
                 self.config = yaml.load(file, Loader=yaml.FullLoader)
                 
+            # camera topic
+            if self.config["camera"]["image_topic"]!="":
+                self.update_camera_rgb_topic(self.config["camera_image_topic"])
+
+            if self.config["camera"]["depth_topic"]!="":
+                self.update_camera_depth_topic(self.config["camera_depth_topic"])
+            
             # assign camera intrinsics
             fx = self.config["camera"]["intrinsics"]["fx"]
             fy = self.config["camera"]["intrinsics"]["fy"]

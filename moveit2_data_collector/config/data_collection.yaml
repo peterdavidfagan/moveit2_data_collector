@@ -1,6 +1,6 @@
 camera:
-  image_topic_name:
-  depth_topic_name:
+  image_topic: /zed/zed_camera/rgb_raw/image_raw_color
+  depth_topic: /zed/zed_camera/depth_registered/depth
 
   intrinsics:
     fx: 260.8450622558594
