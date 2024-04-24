@@ -18,8 +18,11 @@ from moveit.planning import MoveItPy
 from moveit_configs_utils import MoveItConfigsBuilder
 from ament_index_python.packages import get_package_share_directory
 
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Pose
 from control_msgs.action import GripperCommand
+
+from moveit_msgs.msg import CollisionObject
+from shape_msgs.msg import SolidPrimitive
 
 def plan_and_execute(
     robot,
@@ -80,10 +83,10 @@ class FrankaTable(dm_env.Environment):
     This dm_env is intended to be used in conjunction with PyQt data collection application. This environment abstraction is intended to make data collection compatible with env_logger.
     """
 
-    def __init__(self):
-        robot_ip = "" # not applicable for fake hardware
-        use_gripper = "true" 
-        use_fake_hardware = "true" 
+    def __init__(self, args):
+        robot_ip = args.robot_ip
+        use_gripper = args.use_gripper
+        use_fake_hardware = args.use_fake_hardware
         self.robotiq_tcp_z_offset = 0.175
         
         moveit_config = (
@@ -107,8 +110,32 @@ class FrankaTable(dm_env.Environment):
             ).to_dict()
 
         self.panda = MoveItPy(config_dict=moveit_config)
+        self.planning_scene_monitor = self.panda.get_planning_scene_monitor()
         self.panda_arm = self.panda.get_planning_component("panda_arm") 
         self.gripper_client = GripperClient(args.gripper_controller)
+
+        # add ground plane
+        # with self.planning_scene_monitor.read_write() as scene:
+        #     collision_object = CollisionObject()
+        #     collision_object.header.frame_id = "panda_link0"
+        #     collision_object.id = "boxes"
+
+        #     box_pose = Pose()
+        #     box_pose.position.x = 0.0
+        #     box_pose.position.y = 0.0
+        #     box_pose.position.z = 0.0
+
+        #     box = SolidPrimitive()
+        #     box.type = SolidPrimitive.BOX
+        #     box.dimensions = [2.0, 2.0, 0.01]
+
+        #     collision_object.primitives.append(box)
+        #     collision_object.primitive_poses.append(box_pose)
+        #     collision_object.operation = CollisionObject.ADD
+
+        #     scene.apply_collision_object(collision_object)
+        #     scene.current_state.update()  # Important to ensure the scene is updated
+
 
         self.mode="pick"
         self.current_observation = None
@@ -170,13 +197,12 @@ class FrankaTable(dm_env.Environment):
         # prepick pose
         self.panda_arm.set_start_state_to_current_state()
         pre_pick_pose_msg = deepcopy(pick_pose_msg)
-        pre_pick_pose_msg.pose.position.z += 0.5
+        pre_pick_pose_msg.pose.position.z += 0.3
         self.panda_arm.set_goal_state(pose_stamped_msg=pre_pick_pose_msg, pose_link="panda_link8")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
 
         # pick pose
         self.panda_arm.set_start_state_to_current_state()
-        pick_pose_msg.pose.position.z += 0.1
         self.panda_arm.set_goal_state(pose_stamped_msg=pick_pose_msg, pose_link="panda_link8")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
 
@@ -205,13 +231,12 @@ class FrankaTable(dm_env.Environment):
         # preplace pose
         self.panda_arm.set_start_state_to_current_state()
         pre_place_pose_msg = deepcopy(place_pose_msg)
-        pre_place_pose_msg.pose.position.z += 0.5
+        pre_place_pose_msg.pose.position.z += 0.3
         self.panda_arm.set_goal_state(pose_stamped_msg=pre_place_pose_msg, pose_link="panda_link8")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
 
         # place pose
         self.panda_arm.set_start_state_to_current_state()
-        place_pose_msg.pose.position.z += 0.1
         self.panda_arm.set_goal_state(pose_stamped_msg=place_pose_msg, pose_link="panda_link8")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=3.0)
 

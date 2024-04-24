@@ -17,7 +17,8 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallb
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSHistoryPolicy, QoSReliabilityPolicy
 
 from cv_bridge import CvBridge
-from sensor_msgs.msg import Image
+from image_geometry import PinholeCameraModel, StereoCameraModel
+from sensor_msgs.msg import Image, CameraInfo
 import message_filters
 
 import cv2
@@ -144,6 +145,92 @@ class ImageSubscriber(QThread):
         depth_img = self.cv_bridge.imgmsg_to_cv2(depth, "32FC1") # check encoding
         self.new_depth_image.emit(depth_img)
 
+class CameraInfoSubscriber(QThread):
+    new_camera_info = pyqtSignal(object)
+
+    def __init__(self, camera_info_topic):
+        super().__init__()
+        self.camera_info_topic = camera_info_topic
+        self.camera_callback_group = ReentrantCallbackGroup()
+        self.camera_qos_profile = QoSProfile(
+                depth=1,
+                history=QoSHistoryPolicy(rclpy.qos.HistoryPolicy.KEEP_LAST),
+                reliability=QoSReliabilityPolicy(rclpy.qos.ReliabilityPolicy.RELIABLE),
+            )
+
+    def run(self):
+        self.node = rclpy.create_node('camera_info_subscriber')
+        self.subscription = self.node.create_subscription(
+            CameraInfo, 
+            self.camera_info_topic, 
+            self.camera_info_callback, 
+            self.camera_qos_profile,
+            callback_group=self.camera_callback_group,
+            )
+        self.executor = rclpy.executors.MultiThreadedExecutor()
+        self.executor.add_node(self.node)
+        self.executor.spin()
+
+    def update_topic(self, camera_info_topic):
+        self.camera_info_topic = camera_info_topic
+        self.executor.remove_node(self.node)
+        self.node.destroy_subscription(self.subscription)
+        self.subscription = self.node.create_subscription(
+            CameraInfo, 
+            self.camera_info_topic, 
+            self.camera_info_callback, 
+            self.camera_qos_profile,
+            callback_group=self.camera_callback_group,
+            )
+        self.executor.add_node(self.node)
+        self.executor.wake()
+
+    def camera_info_callback(self, msg):
+        self.new_camera_info.emit(msg)
+
+class StereoCameraInfoSubscriber(QThread):
+    new_camera_info = pyqtSignal(object)
+
+    def __init__(self, right_topic, left_topic):
+        super().__init__()
+        self.camera_callback_group = ReentrantCallbackGroup()
+        self.camera_qos_profile = QoSProfile(
+                depth=1,
+                history=QoSHistoryPolicy(rclpy.qos.HistoryPolicy.KEEP_LAST),
+                reliability=QoSReliabilityPolicy(rclpy.qos.ReliabilityPolicy.RELIABLE),
+            )
+        self.right_topic = right_topic
+        self.left_topic = left_topic
+
+    def run(self):
+        self.node = rclpy.create_node('stereo_camera_info_subscriber')
+
+        self.right_sub = message_filters.Subscriber(
+            self.node,
+            CameraInfo,
+            self.right_topic,
+            callback_group=self.camera_callback_group,
+        )
+
+        self.left_sub = message_filters.Subscriber(
+            self.node,
+            CameraInfo,
+            self.left_topic,
+            callback_group=self.camera_callback_group,
+        )
+
+        self.sync = message_filters.ApproximateTimeSynchronizer(
+            [self.right_sub, self.left_sub],
+            10,
+            1.0,
+            )
+        self.sync.registerCallback(self.stereo_callback)
+        self.executor = rclpy.executors.MultiThreadedExecutor()
+        self.executor.add_node(self.node)
+        self.executor.spin()
+
+    def stereo_callback(self, right, left):
+        self.new_camera_info.emit((right, left)) 
 
 class MainWindow(QMainWindow):
     def __init__(self, env):
@@ -154,6 +241,18 @@ class MainWindow(QMainWindow):
 
         # start ROS image subscriber
         self.image_subscriber = None
+        
+        self.camera_info_subscriber = StereoCameraInfoSubscriber("/zed/zed_camera/right/camera_info", "/zed/zed_camera/left/camera_info")
+        self.camera_info_subscriber.new_camera_info.connect(self.update_camera_model)
+        self.camera_info_subscriber.start()
+
+        # self.left_camera_info_subscriber = CameraInfoSubscriber("/zed/zed_camera/left/camera_info")
+        # self.left_camera_info_subscriber.new_camera_info.connect(self.update_left_camera_model)
+        # self.left_camera_info_subscriber.start()
+
+        #self.camera_model = PinholeCameraModel()
+        self.camera_model = StereoCameraModel()
+        
         self.image_topic_name=""
         self.depth_topic_name=""
 
@@ -319,13 +418,17 @@ class MainWindow(QMainWindow):
 
         if self.image_subscriber is not None:
             self.image_subscriber.update_depth_topic(self.depth_topic_name)
-        elif self.rgb_topic_name.text()!="":
+        elif self.image_topic_name!="":
             self.image_subscriber = ImageSubscriber(self.image_topic_name, self.depth_topic_name)
             self.image_subscriber.new_rgb_image.connect(self.update_image)
             self.image_subscriber.new_depth_image.connect(self.update_depth_image)
             self.image_subscriber.start()
         else:
             print("both topics need to be set")
+
+    def update_camera_model(self, info):
+        right, left = info
+        self.camera_model.fromCameraInfo(right, left)
 
     def update_pixel_coordinates(self, event: QMouseEvent):
         point = event.pos()
@@ -340,15 +443,15 @@ class MainWindow(QMainWindow):
         """
         fileName, _ = QFileDialog.getOpenFileName(self, "Open Application Parameters File", "", "YAML Files (*.yaml)")
         if fileName:
-            with open(file_path, "r") as file:
+            with open(fileName, "r") as file:
                 self.config = yaml.load(file, Loader=yaml.FullLoader)
                 
             # camera topic
             if self.config["camera"]["image_topic"]!="":
-                self.update_camera_rgb_topic(self.config["camera_image_topic"])
+                self.update_rgb_topic(self.config["camera"]["image_topic"])
 
             if self.config["camera"]["depth_topic"]!="":
-                self.update_camera_depth_topic(self.config["camera_depth_topic"])
+                self.update_depth_topic(self.config["camera"]["depth_topic"])
             
             # assign camera intrinsics
             fx = self.config["camera"]["intrinsics"]["fx"]
@@ -364,15 +467,20 @@ class MainWindow(QMainWindow):
                 self.config["camera"]["extrinsics"]["z"],
                 ]
             quaternion = [
-                self.config["camera"]["extrinsics"]["qw"],
                 self.config["camera"]["extrinsics"]["qx"],
                 self.config["camera"]["extrinsics"]["qy"],
                 self.config["camera"]["extrinsics"]["qz"],
+                self.config["camera"]["extrinsics"]["qw"],
                 ]
+            print(translation)
+            print(quaternion)
             rotation = st.Rotation.from_quat(quaternion).as_matrix()
             self.camera_extrinsics = np.eye(4)
-            self.camera_extrinsics[:3, :3] = rotation.T
-            self.camera_extrinsics[:3, 3] = -rotation.T @ translation
+            #self.camera_extrinsics[:3, :3] = rotation.T
+            #self.camera_extrinsics[:3, 3] = -rotation.T @ 
+            self.camera_extrinsics[:3, :3] = rotation
+            self.camera_extrinsics[:3, 3] = translation
+            
 
     def update_application_params(self):
         self.table_height = float(self.line_edit.text())  # Convert input text to float 
@@ -416,6 +524,12 @@ class MainWindow(QMainWindow):
         # map pixel coords to world coords
         # inpaint nan and inf values in depth image
         depth_img = self.depth_image.copy()
+        print(depth_img.shape)
+        u = self.x
+        v = self.y
+        print(u)
+        print(v)
+        print(depth_img[v, u])
         nan_mask = np.isnan(depth_img)
         inf_mask = np.isinf(depth_img)
         mask = np.logical_or(nan_mask, inf_mask)
@@ -432,21 +546,22 @@ class MainWindow(QMainWindow):
         x_range, y_range = np.meshgrid(np.arange(depth_img.shape[1]), np.arange(depth_img.shape[0]))
         depth_img = griddata((x, y), depth_img[y, x], (x_range, y_range), method='nearest')
         depth_img = depth_img * scale 
-        depth_val = depth_img[self.x, self.y]
+        depth_val = depth_img[v, u]
         print(depth_img.shape)
         print(depth_val)
 
         ## convert current pixels coordinates to camera frame coordinates
-        pixel_coords = np.array([self.x, self.y])
+        pixel_coords = np.array([u, v])
         print(pixel_coords)
         image_coords = np.concatenate([pixel_coords, np.ones(1)])
         camera_coords =  np.linalg.inv(self.camera_intrinsics) @ image_coords
         camera_coords *= depth_val # negate depth when using mujoco camera convention
         print(camera_coords)
+        #print(self.camera_model.projectPixelTo3d((self.y, self.x)))
 
         ## convert camera coordinates to world coordinates
         camera_coords = np.concatenate([camera_coords, np.ones(1)])
-        world_coords = np.linalg.inv(self.camera_extrinsics) @ camera_coords
+        world_coords = self.camera_extrinsics @ camera_coords
         world_coords = world_coords[:3] / world_coords[3]
 
         print("World Coordinates:", world_coords)
