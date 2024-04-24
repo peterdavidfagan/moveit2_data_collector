@@ -80,10 +80,11 @@ class FrankaTable(dm_env.Environment):
     This dm_env is intended to be used in conjunction with PyQt data collection application. This environment abstraction is intended to make data collection compatible with env_logger.
     """
 
-    def __init__(self, args):
-        robot_ip = args.robot_ip
-        use_gripper = args.use_gripper
-        use_fake_hardware = args.use_fake_hardware
+    def __init__(self):
+        robot_ip = "" # not applicable for fake hardware
+        use_gripper = "true" 
+        use_fake_hardware = "true" 
+        self.robotiq_tcp_z_offset = 0.175
         
         moveit_config = (
             MoveItConfigsBuilder(robot_name="panda", package_name="franka_robotiq_moveit_config")
@@ -160,7 +161,7 @@ class FrankaTable(dm_env.Environment):
         pick_pose_msg.header.frame_id = "panda_link0"
         pick_pose_msg.pose.position.x = pose[0]
         pick_pose_msg.pose.position.y = pose[1]
-        pick_pose_msg.pose.position.z = pose[2]
+        pick_pose_msg.pose.position.z = pose[2] + self.robotiq_tcp_z_offset
         pick_pose_msg.pose.orientation.x = pose[3]
         pick_pose_msg.pose.orientation.y = pose[4]
         pick_pose_msg.pose.orientation.z = pose[5]
@@ -169,13 +170,13 @@ class FrankaTable(dm_env.Environment):
         # prepick pose
         self.panda_arm.set_start_state_to_current_state()
         pre_pick_pose_msg = deepcopy(pick_pose_msg)
-        pre_pick_pose_msg.pose.position.z += 0.6
+        pre_pick_pose_msg.pose.position.z += 0.5
         self.panda_arm.set_goal_state(pose_stamped_msg=pre_pick_pose_msg, pose_link="panda_link8")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
 
         # pick pose
         self.panda_arm.set_start_state_to_current_state()
-        pick_pose_msg.pose.position.z += 0.2
+        pick_pose_msg.pose.position.z += 0.1
         self.panda_arm.set_goal_state(pose_stamped_msg=pick_pose_msg, pose_link="panda_link8")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
 
@@ -195,7 +196,7 @@ class FrankaTable(dm_env.Environment):
         place_pose_msg.header.frame_id = "panda_link0"
         place_pose_msg.pose.position.x = pose[0]
         place_pose_msg.pose.position.y = pose[1]
-        place_pose_msg.pose.position.z = pose[2]
+        place_pose_msg.pose.position.z = pose[2] + self.robotiq_tcp_z_offset
         place_pose_msg.pose.orientation.x = pose[3]
         place_pose_msg.pose.orientation.y = pose[4]
         place_pose_msg.pose.orientation.z = pose[5]
@@ -204,13 +205,13 @@ class FrankaTable(dm_env.Environment):
         # preplace pose
         self.panda_arm.set_start_state_to_current_state()
         pre_place_pose_msg = deepcopy(place_pose_msg)
-        pre_place_pose_msg.pose.position.z += 0.6
+        pre_place_pose_msg.pose.position.z += 0.5
         self.panda_arm.set_goal_state(pose_stamped_msg=pre_place_pose_msg, pose_link="panda_link8")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
 
         # place pose
         self.panda_arm.set_start_state_to_current_state()
-        place_pose_msg.pose.position.z += 0.2
+        place_pose_msg.pose.position.z += 0.1
         self.panda_arm.set_goal_state(pose_stamped_msg=place_pose_msg, pose_link="panda_link8")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=3.0)
 
