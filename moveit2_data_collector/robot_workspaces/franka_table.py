@@ -14,7 +14,7 @@ from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.logging import get_logger
 
-from moveit.planning import MoveItPy
+from moveit.planning import MoveItPy, PlanRequestParameters
 from moveit_configs_utils import MoveItConfigsBuilder
 from ament_index_python.packages import get_package_share_directory
 
@@ -87,7 +87,7 @@ class FrankaTable(dm_env.Environment):
         robot_ip = args.robot_ip
         use_gripper = args.use_gripper
         use_fake_hardware = args.use_fake_hardware
-        self.robotiq_tcp_z_offset = 0.175
+        self.robotiq_tcp_z_offset = 0.15
         
         moveit_config = (
             MoveItConfigsBuilder(robot_name="panda", package_name="franka_robotiq_moveit_config")
@@ -145,6 +145,7 @@ class FrankaTable(dm_env.Environment):
         self.panda_arm.set_goal_state(configuration_name="ready")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
         self.gripper_client.open_gripper()
+        self.mode = "pick"
         return dm_env.TimeStep(
                 step_type=dm_env.StepType.FIRST,
                 reward=0.0,
@@ -194,23 +195,42 @@ class FrankaTable(dm_env.Environment):
         pick_pose_msg.pose.orientation.z = pose[5]
         pick_pose_msg.pose.orientation.w = pose[6]
         
+        self.pick_height=pose[2]
+
         # prepick pose
         self.panda_arm.set_start_state_to_current_state()
         pre_pick_pose_msg = deepcopy(pick_pose_msg)
-        pre_pick_pose_msg.pose.position.z += 0.3
+        pre_pick_pose_msg.pose.position.z = 0.6
         self.panda_arm.set_goal_state(pose_stamped_msg=pre_pick_pose_msg, pose_link="panda_link8")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
 
         # pick pose
         self.panda_arm.set_start_state_to_current_state()
         self.panda_arm.set_goal_state(pose_stamped_msg=pick_pose_msg, pose_link="panda_link8")
-        plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
+        req = PlanRequestParameters(self.panda, "pilz_lin")
+        req.planner_id = "LIN"
+        req.max_acceleration_scaling_factor = 0.01
+        req.max_velocity_scaling_factor = 0.1
+        req.planning_time = 5.0
+        req.planning_attempts = 100
+        plan_and_execute(self.panda, self.panda_arm, single_plan_parameters=req, sleep_time=1.0)
 
         # close gripper
         self.gripper_client.close_gripper()
         time.sleep(3.0)
         
         # raise arm
+        self.panda_arm.set_start_state_to_current_state()
+        self.panda_arm.set_goal_state(pose_stamped_msg=pre_pick_pose_msg, pose_link="panda_link8")
+        req = PlanRequestParameters(self.panda, "pilz_lin")
+        req.planner_id = "LIN"
+        req.max_acceleration_scaling_factor = 0.01
+        req.max_velocity_scaling_factor = 0.1
+        req.planning_time = 5.0
+        req.planning_attempts = 100
+        plan_and_execute(self.panda, self.panda_arm, single_plan_parameters=req, sleep_time=1.0)
+
+        # go to ready position
         self.panda_arm.set_start_state_to_current_state()
         self.panda_arm.set_goal_state(configuration_name="ready")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
@@ -222,7 +242,7 @@ class FrankaTable(dm_env.Environment):
         place_pose_msg.header.frame_id = "panda_link0"
         place_pose_msg.pose.position.x = pose[0]
         place_pose_msg.pose.position.y = pose[1]
-        place_pose_msg.pose.position.z = pose[2] + self.robotiq_tcp_z_offset
+        place_pose_msg.pose.position.z = self.pick_height + self.robotiq_tcp_z_offset
         place_pose_msg.pose.orientation.x = pose[3]
         place_pose_msg.pose.orientation.y = pose[4]
         place_pose_msg.pose.orientation.z = pose[5]
@@ -231,24 +251,36 @@ class FrankaTable(dm_env.Environment):
         # preplace pose
         self.panda_arm.set_start_state_to_current_state()
         pre_place_pose_msg = deepcopy(place_pose_msg)
-        pre_place_pose_msg.pose.position.z += 0.3
+        pre_place_pose_msg.pose.position.z = 0.6
         self.panda_arm.set_goal_state(pose_stamped_msg=pre_place_pose_msg, pose_link="panda_link8")
         plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
 
         # place pose
         self.panda_arm.set_start_state_to_current_state()
         self.panda_arm.set_goal_state(pose_stamped_msg=place_pose_msg, pose_link="panda_link8")
-        plan_and_execute(self.panda, self.panda_arm, sleep_time=3.0)
+        req = PlanRequestParameters(self.panda, "pilz_lin")
+        req.planner_id = "LIN"
+        req.max_acceleration_scaling_factor = 0.01
+        req.max_velocity_scaling_factor = 0.1
+        req.planning_time = 5.0
+        req.planning_attempts = 100
+        plan_and_execute(self.panda, self.panda_arm, single_plan_parameters=req, sleep_time=1.0)
 
         # open gripper
         self.gripper_client.open_gripper()
         time.sleep(3.0)
         
         # raise arm
+        self.panda_arm.set_start_state_to_current_state()
+        pre_place_pose_msg = deepcopy(place_pose_msg)
+        pre_place_pose_msg.pose.position.z = 0.6
+        self.panda_arm.set_goal_state(pose_stamped_msg=pre_place_pose_msg, pose_link="panda_link8")
+        plan_and_execute(self.panda, self.panda_arm, single_plan_parameters=req, sleep_time=1.0)
+
         # raise arm
         self.panda_arm.set_start_state_to_current_state()
         self.panda_arm.set_goal_state(configuration_name="ready")
-        plan_and_execute(self.panda, self.panda_arm, sleep_time=3.0)
+        plan_and_execute(self.panda, self.panda_arm, sleep_time=1.0)
 
         self.mode = "pick"
 

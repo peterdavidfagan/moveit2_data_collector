@@ -17,7 +17,6 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallb
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSHistoryPolicy, QoSReliabilityPolicy
 
 from cv_bridge import CvBridge
-from image_geometry import PinholeCameraModel, StereoCameraModel
 from sensor_msgs.msg import Image, CameraInfo
 import message_filters
 
@@ -145,93 +144,6 @@ class ImageSubscriber(QThread):
         depth_img = self.cv_bridge.imgmsg_to_cv2(depth, "32FC1") # check encoding
         self.new_depth_image.emit(depth_img)
 
-class CameraInfoSubscriber(QThread):
-    new_camera_info = pyqtSignal(object)
-
-    def __init__(self, camera_info_topic):
-        super().__init__()
-        self.camera_info_topic = camera_info_topic
-        self.camera_callback_group = ReentrantCallbackGroup()
-        self.camera_qos_profile = QoSProfile(
-                depth=1,
-                history=QoSHistoryPolicy(rclpy.qos.HistoryPolicy.KEEP_LAST),
-                reliability=QoSReliabilityPolicy(rclpy.qos.ReliabilityPolicy.RELIABLE),
-            )
-
-    def run(self):
-        self.node = rclpy.create_node('camera_info_subscriber')
-        self.subscription = self.node.create_subscription(
-            CameraInfo, 
-            self.camera_info_topic, 
-            self.camera_info_callback, 
-            self.camera_qos_profile,
-            callback_group=self.camera_callback_group,
-            )
-        self.executor = rclpy.executors.MultiThreadedExecutor()
-        self.executor.add_node(self.node)
-        self.executor.spin()
-
-    def update_topic(self, camera_info_topic):
-        self.camera_info_topic = camera_info_topic
-        self.executor.remove_node(self.node)
-        self.node.destroy_subscription(self.subscription)
-        self.subscription = self.node.create_subscription(
-            CameraInfo, 
-            self.camera_info_topic, 
-            self.camera_info_callback, 
-            self.camera_qos_profile,
-            callback_group=self.camera_callback_group,
-            )
-        self.executor.add_node(self.node)
-        self.executor.wake()
-
-    def camera_info_callback(self, msg):
-        self.new_camera_info.emit(msg)
-
-class StereoCameraInfoSubscriber(QThread):
-    new_camera_info = pyqtSignal(object)
-
-    def __init__(self, right_topic, left_topic):
-        super().__init__()
-        self.camera_callback_group = ReentrantCallbackGroup()
-        self.camera_qos_profile = QoSProfile(
-                depth=1,
-                history=QoSHistoryPolicy(rclpy.qos.HistoryPolicy.KEEP_LAST),
-                reliability=QoSReliabilityPolicy(rclpy.qos.ReliabilityPolicy.RELIABLE),
-            )
-        self.right_topic = right_topic
-        self.left_topic = left_topic
-
-    def run(self):
-        self.node = rclpy.create_node('stereo_camera_info_subscriber')
-
-        self.right_sub = message_filters.Subscriber(
-            self.node,
-            CameraInfo,
-            self.right_topic,
-            callback_group=self.camera_callback_group,
-        )
-
-        self.left_sub = message_filters.Subscriber(
-            self.node,
-            CameraInfo,
-            self.left_topic,
-            callback_group=self.camera_callback_group,
-        )
-
-        self.sync = message_filters.ApproximateTimeSynchronizer(
-            [self.right_sub, self.left_sub],
-            10,
-            1.0,
-            )
-        self.sync.registerCallback(self.stereo_callback)
-        self.executor = rclpy.executors.MultiThreadedExecutor()
-        self.executor.add_node(self.node)
-        self.executor.spin()
-
-    def stereo_callback(self, right, left):
-        self.new_camera_info.emit((right, left)) 
-
 class MainWindow(QMainWindow):
     def __init__(self, env):
         super().__init__()
@@ -240,19 +152,7 @@ class MainWindow(QMainWindow):
         self.initUI()
 
         # start ROS image subscriber
-        self.image_subscriber = None
-        
-        self.camera_info_subscriber = StereoCameraInfoSubscriber("/zed/zed_camera/right/camera_info", "/zed/zed_camera/left/camera_info")
-        self.camera_info_subscriber.new_camera_info.connect(self.update_camera_model)
-        self.camera_info_subscriber.start()
-
-        # self.left_camera_info_subscriber = CameraInfoSubscriber("/zed/zed_camera/left/camera_info")
-        # self.left_camera_info_subscriber.new_camera_info.connect(self.update_left_camera_model)
-        # self.left_camera_info_subscriber.start()
-
-        #self.camera_model = PinholeCameraModel()
-        self.camera_model = StereoCameraModel()
-        
+        self.image_subscriber = None        
         self.image_topic_name=""
         self.depth_topic_name=""
 
@@ -425,10 +325,6 @@ class MainWindow(QMainWindow):
             self.image_subscriber.start()
         else:
             print("both topics need to be set")
-
-    def update_camera_model(self, info):
-        right, left = info
-        self.camera_model.fromCameraInfo(right, left)
 
     def update_pixel_coordinates(self, event: QMouseEvent):
         point = event.pos()
