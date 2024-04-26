@@ -27,18 +27,6 @@ import envlogger
 
 
 class Worker(QRunnable):
-    '''
-    Worker thread
-
-    Inherits from QRunnable to handler worker thread setup, signals and wrap-up.
-
-    :param callback: The function callback to run on this worker thread. Supplied args and
-                     kwargs will be passed through to the runner.
-    :type callback: function
-    :param args: Arguments to pass to the callback function
-    :param kwargs: Keywords to pass to the callback function
-
-    '''
 
     def __init__(self, fn, *args, **kwargs):
         super(Worker, self).__init__()
@@ -49,9 +37,6 @@ class Worker(QRunnable):
 
     @pyqtSlot()
     def run(self):
-        '''
-        Initialise the runner function with passed args, kwargs.
-        '''
         self.fn(*self.args, **self.kwargs)
 
 class ImageSubscriber(QThread):
@@ -334,9 +319,6 @@ class MainWindow(QMainWindow):
         self.y_edit.setText(str(y))
 
     def upload_camera_params(self):
-        """
-        Reads camera calibration parameters from a json file
-        """
         fileName, _ = QFileDialog.getOpenFileName(self, "Open Application Parameters File", "", "YAML Files (*.yaml)")
         if fileName:
             with open(fileName, "r") as file:
@@ -368,12 +350,8 @@ class MainWindow(QMainWindow):
                 self.config["camera"]["extrinsics"]["qz"],
                 self.config["camera"]["extrinsics"]["qw"],
                 ]
-            print(translation)
-            print(quaternion)
             rotation = st.Rotation.from_quat(quaternion).as_matrix()
             self.camera_extrinsics = np.eye(4)
-            #self.camera_extrinsics[:3, :3] = rotation.T
-            #self.camera_extrinsics[:3, 3] = -rotation.T @ 
             self.camera_extrinsics[:3, :3] = rotation
             self.camera_extrinsics[:3, 3] = translation
             
@@ -398,7 +376,6 @@ class MainWindow(QMainWindow):
         cv2.line(image, (x1, y1), (x2, y2), color, thickness)
 
     def update_image(self, rgb_img):
-        # store the current image
         self.rgb_image = rgb_img.copy() 
 
         # overlay a line centred at pixel coord with gripper orientation
@@ -417,22 +394,16 @@ class MainWindow(QMainWindow):
         self.depth_image = depth_img.copy() 
 
     def env_step(self):
-        # map pixel coords to world coords
-        # inpaint nan and inf values in depth image
         depth_img = self.depth_image.copy()
-        print(depth_img.shape)
         u = self.x
         v = self.y
-        print(u)
-        print(v)
-        print(depth_img[v, u])
+        
+        # start by inpainting depth values (sometimes sensor returns nan/inf)
         nan_mask = np.isnan(depth_img)
         inf_mask = np.isinf(depth_img)
         mask = np.logical_or(nan_mask, inf_mask)
         mask = cv2.UMat(mask.astype(np.uint8))
-
-        # Scale to keep as float, but has to be in bounds -1:1 to keep opencv happy.
-        scale = np.ma.masked_invalid(np.abs(depth_img)).max()
+        scale = np.ma.masked_invalid(np.abs(depth_img)).max() # scale to keep as float, but has to be in bounds -1:1 to keep opencv happy.
         depth_img = depth_img.astype(np.float32) / scale  # Has to be float32, 64 not supported.
         depth_img = cv2.inpaint(depth_img, mask, 1, cv2.INPAINT_NS)
 
@@ -443,26 +414,20 @@ class MainWindow(QMainWindow):
         depth_img = griddata((x, y), depth_img[y, x], (x_range, y_range), method='nearest')
         depth_img = depth_img * scale 
         depth_val = depth_img[v, u]
-        print(depth_img.shape)
-        print(depth_val)
 
-        ## convert current pixels coordinates to camera frame coordinates
+        # convert current pixels coordinates to camera frame coordinates
         pixel_coords = np.array([u, v])
-        print(pixel_coords)
         image_coords = np.concatenate([pixel_coords, np.ones(1)])
         camera_coords =  np.linalg.inv(self.camera_intrinsics) @ image_coords
         camera_coords *= depth_val # negate depth when using mujoco camera convention
-        print(camera_coords)
-        #print(self.camera_model.projectPixelTo3d((self.y, self.x)))
 
-        ## convert camera coordinates to world coordinates
+        # convert camera coordinates to world coordinates
         camera_coords = np.concatenate([camera_coords, np.ones(1)])
         world_coords = self.camera_extrinsics @ camera_coords
         world_coords = world_coords[:3] / world_coords[3]
 
         print("World Coordinates:", world_coords)
         
-        #world_coords = np.array([0.5, 0.0, 0.2]) # hardcode while debugging
         quat = R.from_euler('xyz', [0, 180, self.gripper_rot_z], degrees=True).as_quat()
         pose = np.concatenate([world_coords, quat])
 
