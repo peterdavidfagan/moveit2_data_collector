@@ -87,7 +87,7 @@ class FrankaTable(dm_env.Environment):
         robot_ip = args.robot_ip
         use_gripper = args.use_gripper
         use_fake_hardware = args.use_fake_hardware
-        self.robotiq_tcp_z_offset = 0.165 # TODO: consider moving to franka_robotiq launch file as static tf
+        self.robotiq_tcp_z_offset = 0.17 # TODO: consider moving to franka_robotiq launch file as static tf
         
         moveit_config = (
             MoveItConfigsBuilder(robot_name="panda", package_name="franka_robotiq_moveit_config")
@@ -146,8 +146,7 @@ class FrankaTable(dm_env.Environment):
         self.mode="pick"
         self.current_observation = None
 
-    def reset(self) -> dm_env.TimeStep:
-
+    def reset(self) -> dm_env.TimeStep:        
         # return to home state
         self.panda_arm.set_start_state_to_current_state()
         self.panda_arm.set_goal_state(configuration_name="ready")
@@ -161,7 +160,15 @@ class FrankaTable(dm_env.Environment):
                 step_type=dm_env.StepType.FIRST,
                 reward=0.0,
                 discount=0.0,
-                observation=self.current_observation,
+                observation=deepcopy(self.current_observation),
+                )
+    
+    def done_step(self) -> dm_env.TimeStep:
+        return dm_env.TimeStep(
+                step_type=dm_env.StepType.LAST,
+                reward=0.0,
+                discount=0.0,
+                observation=deepcopy(self.current_observation),
                 )
 
     def step(self, pose) -> dm_env.TimeStep:
@@ -174,22 +181,40 @@ class FrankaTable(dm_env.Environment):
                 step_type=dm_env.StepType.MID,
                 reward=0.0,
                 discount=0.0,
-                observation=self.current_observation,
+                observation=deepcopy(self.current_observation),
                 )
 
-    def set_observation(self, obs):
-        self.current_observation = obs
+    def set_observation(self, rgb, depth):
+        self.current_observation = {
+            "overhead_camera/rgb": rgb,
+            "overhead_camera/depth": depth,
+        }
+
+    def set_metadata(self, config):
+        self.metadata = config
 
     def observation_spec(self) -> Dict[str, dm_env.specs.Array]:
         return {
-                #"overhead_camera/depth": dm_env.specs.Array(shape=(640,640), dtype=np.float32),
-                "overhead_camera/rgb": dm_env.specs.Array(shape=(640, 640, 3), dtype=np.float32),
+                "overhead_camera/rgb": dm_env.specs.Array(shape=(621,1104, 3), dtype=np.float32),
+                "overhead_camera/depth": dm_env.specs.Array(shape=(621, 1104), dtype=np.float32),
                 }
 
     def action_spec(self) -> dm_env.specs.Array:
         return dm_env.specs.Array(
                 shape=(7,), # [x, y, z, qx, qy, qz, qw]
-                dtype=np.float32,
+                dtype=np.float64,
+                )
+    
+    def reward_spec(self) -> dm_env.specs.Array:
+        return dm_env.specs.Array(
+                shape=(7,), # [x, y, z, qx, qy, qz, qw]
+                dtype=np.float64,
+                )
+
+    def discount_spec(self) -> dm_env.specs.Array:
+        return dm_env.specs.Array(
+                shape=(7,), # [x, y, z, qx, qy, qz, qw]
+                dtype=np.float64,
                 )
 
     def close(self):

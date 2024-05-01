@@ -24,6 +24,9 @@ import cv2
 
 from robot_workspaces.franka_table import FrankaTable
 import envlogger
+from envlogger.backends import tfds_backend_writer
+import tensorflow as tf
+import tensorflow_datasets as tfds
 
 
 class Worker(QRunnable):
@@ -54,6 +57,11 @@ class ImageSubscriber(QThread):
             )
         self.rgb_topic = rgb_topic
         self.depth_topic = depth_topic
+
+    def __del__(self):
+        self.executor.remove_node(self.node)
+        self.node.destroy_node()
+        self.executor.shutdown()
 
     def run(self):
         self.node = rclpy.create_node('image_subscriber')
@@ -152,7 +160,10 @@ class MainWindow(QMainWindow):
         self.y = 0.0
         self.gripper_rot_z = 0.0
         self.camera_intrinsics = None
-        self.camera_extrinsics = None
+        self.camera_extrinsics = None   
+
+    def __del__(self):
+        self.image_subscriber.exit()
 
     def initUI(self):
         central_widget = QWidget()
@@ -172,36 +183,11 @@ class MainWindow(QMainWindow):
         left_pane.addWidget(self.label_image)
         horizontal_panes.addLayout(left_pane)
 
-        # Right Pane
-        self.rgb_topic_label = QLabel("RGB Topic:")
-        self.rgb_topic_label.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.rgb_topic_label.setFixedHeight(20)
-
-        self.rgb_topic_name = QLineEdit()
-        self.rgb_topic_name.setPlaceholderText("Enter image topic")
-        self.rgb_topic_name.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.rgb_topic_name.setFixedHeight(20)
-        self.rgb_topic_name.returnPressed.connect(self.update_rgb_topic)
-
-        self.depth_topic_label = QLabel("Depth Topic:")
-        self.depth_topic_label.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.depth_topic_label.setFixedHeight(20)
-
-        self.depth_topic_name = QLineEdit()
-        self.depth_topic_name.setPlaceholderText("Enter image topic")
-        self.depth_topic_name.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.depth_topic_name.setFixedHeight(20)
-        self.depth_topic_name.returnPressed.connect(self.update_depth_topic)
-
-        # table height input
-        self.label_table_height = QLabel("Enter Table Height Offset:")
-        self.label_table_height.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.label_table_height.setFixedHeight(20)
-        self.line_edit = QLineEdit()
-        self.line_edit.setPlaceholderText("Enter table height")
-        self.line_edit.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.line_edit.setFixedHeight(20)
-        self.line_edit.returnPressed.connect(self.update_application_params)
+        # config upload
+        self.upload_label = QLabel("Upload Application Config:")
+        self.upload_button = QPushButton("Upload Application Parameters")
+        self.upload_button.setFixedHeight(20)
+        self.upload_button.clicked.connect(self.upload_camera_params)
 
         # pixel coordinates
         self.label_pixel_coords = QLabel("Selected Pixel Coordinates:")
@@ -234,11 +220,6 @@ class MainWindow(QMainWindow):
         self.gripper_rot_z_edit.setPlaceholderText("Z")
         self.gripper_rot_z_edit.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.gripper_rot_z_edit.setFixedHeight(20)
-        
-        # button to upload file containing camera calibration parameters
-        self.upload_button = QPushButton("Upload Camera Parameters")
-        self.upload_button.setFixedHeight(20)
-        self.upload_button.clicked.connect(self.upload_camera_params)
 
         # button to update application parameters
         self.submit_button = QPushButton("Submit Application Parameters")
@@ -246,30 +227,41 @@ class MainWindow(QMainWindow):
         self.submit_button.setFixedHeight(20)
         
         # step environment button
-        self.step_button = QPushButton("Step Environment")
-        self.step_button.clicked.connect(self.env_step)
-        self.step_button.setFixedHeight(20)
-    
+        self.environment_label = QLabel("Interact with Environment:")
+
         # reset environment button
         self.reset_button = QPushButton("Reset Environment")
         self.reset_button.clicked.connect(self.env_reset)
         self.reset_button.setFixedHeight(20)
 
+        # step environment button
+        self.step_button = QPushButton("Step Environment")
+        self.step_button.clicked.connect(self.env_step)
+        self.step_button.setFixedHeight(20)
+    
+        # episode done button
+        self.done_button = QPushButton("Done Environment")
+        self.done_button.clicked.connect(self.env_done)
+        self.done_button.setFixedHeight(20)
+
+        # stop data collection
+        self.stop_button = QPushButton("Stop Data Collection")
+        self.stop_button.clicked.connect(self.stop_data_collection)
+        self.stop_button.setFixedHeight(20)
+
         # add all widgets to right pane
-        right_pane.addWidget(self.rgb_topic_label)
-        right_pane.addWidget(self.rgb_topic_name)
-        right_pane.addWidget(self.depth_topic_label)
-        right_pane.addWidget(self.depth_topic_name)
-        right_pane.addWidget(self.label_table_height)
-        right_pane.addWidget(self.line_edit)
+        right_pane.addWidget(self.upload_label)
+        right_pane.addWidget(self.upload_button)
         right_pane.addWidget(self.label_pixel_coords)
         right_pane.addLayout(pixel_coords_box)
         right_pane.addWidget(self.label_gripper_orientation)
         right_pane.addWidget(self.gripper_rot_z_edit)
         right_pane.addWidget(self.submit_button)
-        right_pane.addWidget(self.upload_button)
-        right_pane.addWidget(self.step_button)
+        right_pane.addWidget(self.environment_label)        
         right_pane.addWidget(self.reset_button)
+        right_pane.addWidget(self.step_button)
+        right_pane.addWidget(self.done_button)
+        right_pane.addWidget(self.stop_button)
 
         # add to main screen
         horizontal_panes.addLayout(right_pane)
@@ -324,6 +316,12 @@ class MainWindow(QMainWindow):
             with open(fileName, "r") as file:
                 self.config = yaml.load(file, Loader=yaml.FullLoader)
                 
+            # expose config to env for dataset metadata
+            self.env.set_metadata(self.config)
+
+            # table height
+            self.table_height = self.config["workspace"]["table_height_offset"]
+
             # camera topic
             if self.config["camera"]["image_topic"]!="":
                 self.update_rgb_topic(self.config["camera"]["image_topic"])
@@ -357,7 +355,6 @@ class MainWindow(QMainWindow):
             
 
     def update_application_params(self):
-        self.table_height = float(self.line_edit.text())  # Convert input text to float 
         self.x = int(self.x_edit.text())
         self.y = int(self.y_edit.text())
         self.gripper_rot_z = float(self.gripper_rot_z_edit.text())
@@ -432,15 +429,25 @@ class MainWindow(QMainWindow):
         pose = np.concatenate([world_coords, quat])
 
         if self.mode == "pick":
+            self.env.set_observation(self.rgb_image, self.depth_image)
             worker = Worker(self.env.step, pose)
         else:
+            self.env.set_observation(self.rgb_image, self.depth_image)
             worker = Worker(self.env.step, pose)
         
         self.threadpool.start(worker)
     
     def env_reset(self):
-        self.env.set_observation(self.rgb_image)
+        self.env.set_observation(self.rgb_image, self.depth_image)
         self.env.reset()
+
+    def env_done(self):
+        self.env.set_observation(self.rgb_image, self.depth_image)
+        self.env.done_step()
+
+    def stop_data_collection(self):
+        self.env.close()
+        self.close()
 
 
 def main(args=None):
@@ -450,16 +457,63 @@ def main(args=None):
     parser.add_argument("--use_gripper", default="true", required=False)
     parser.add_argument("--gripper_controller", default="/robotiq/robotiq_gripper_controller/gripper_cmd", required=False)
     args = parser.parse_args()
+
+    # TFDS dataset configuration
+    dataset_config = tfds.rlds.rlds_base.DatasetConfig(
+        name="transport_cubes",
+        observation_info=tfds.features.FeaturesDict({
+            "overhead_camera/rgb": tfds.features.Tensor(shape=(621,1104, 3), dtype=np.uint8),
+            "overhead_camera/depth": tfds.features.Tensor(shape=(621,1104), dtype=np.float32),
+        }),
+        action_info=tfds.features.Tensor(shape=(7,), dtype=tf.float64),
+        reward_info=tf.float64,
+        discount_info=tf.float64,
+        episode_metadata_info={
+            "image_topic": tf.string,
+            "depth_topic": tf.string,
+            "intrinsics":{
+                "fx": tf.float64,
+                "fy": tf.float64,
+                "cx": tf.float64,
+                "cy": tf.float64,  
+            },
+            "extrinsics":{
+                "x": tf.float64,
+                "y": tf.float64,
+                "z": tf.float64,
+                "qw": tf.float64,   
+                "qx": tf.float64,
+                "qy": tf.float64,
+                "qz": tf.float64,
+            },
+        },
+        )
     
+    def calibration_metadata(timestep, unused_action, unused_env):
+        """
+        Store camera calibration params as episode metadata.
+        """
+        if timestep.first:
+            return unused_env.metadata["camera"]
+        else:
+            return None
+
     rclpy.init(args=None)
     env = FrankaTable(args)
     os.makedirs(os.path.join(os.path.dirname(__file__), "data"), exist_ok=True)
     with envlogger.EnvLogger(
             env, 
-            data_directory=os.path.join(os.path.dirname(__file__), "data")) as env:
+            episode_fn=calibration_metadata,
+            backend = tfds_backend_writer.TFDSBackendWriter(
+                data_directory=os.path.join(os.path.dirname(__file__), "data"),
+                split_name='train',
+                max_episodes_per_file=1,
+                ds_config=dataset_config,
+            ),
+            ) as env:
         app = QApplication(sys.argv)
         ex = MainWindow(env)
-        sys.exit(app.exec())
+        app.exec()
 
 if __name__ == '__main__':
     main()
