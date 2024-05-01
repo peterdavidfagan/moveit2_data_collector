@@ -8,10 +8,5 @@ https://github.com/peterdavidfagan/moveit2_data_collector/assets/42982057/6c76f7
 
 ## Supported Datasets
 
-Currently this repository targets the collection of demonstration datasets to train [transporter networks](https://transporternets.github.io/) on real robots.
+Currently this repository targets the collection of demonstration datasets to train [transporter networks](https://transporternets.github.io/) on real robots. Sample datasets are published [here](https://huggingface.co/datasets/peterdavidfagan/transporter_networks).
 
-Sample datasets will be published to [here](https://huggingface.co/peterdavidfagan).
-
-For examples of training transporter networks using the resulting data please see [robot_learning_baselines](https://github.com/peterdavidfagan/robot_learning_baselines).
-
-## Getting Started
