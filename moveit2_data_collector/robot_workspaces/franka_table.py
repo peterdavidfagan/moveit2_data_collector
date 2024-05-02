@@ -202,7 +202,7 @@ class FrankaTable(dm_env.Environment):
     def action_spec(self) -> dm_env.specs.Array:
         return {
                 "pose": dm_env.specs.Array(shape=(7,), dtype=np.float64), # [x, y, z, qx, qy, qz, qw]
-                "pixel_coords": dm_env.specs.Array(shape=(2,), dtype=np.int), # [u, v]
+                "pixel_coords": dm_env.specs.Array(shape=(2,), dtype=np.int64), # [u, v]
                 "gripper_rot": dm_env.specs.Array(shape=(1,), dtype=np.float64),
                 }
     

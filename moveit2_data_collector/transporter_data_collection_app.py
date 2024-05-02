@@ -357,7 +357,7 @@ class MainWindow(QMainWindow):
     def update_application_params(self):
         self.x = int(self.x_edit.text())
         self.y = int(self.y_edit.text())
-        self.gripper_rot_z = float(self.gripper_rot_z_edit.text())
+        self.gripper_rot_z =  float(self.gripper_rot_z_edit.text()) 
 
     def overlay_gripper_line(self, image, center, length, angle_degrees, color=(255, 0, 0), thickness=3):
         # Convert angle from degrees to radians
@@ -425,13 +425,13 @@ class MainWindow(QMainWindow):
 
         print("World Coordinates:", world_coords)
         
-        quat = R.from_euler('xyz', [0, 180, self.gripper_rot_z], degrees=True).as_quat()
+        quat = R.from_euler('xyz', [0, 180, -self.gripper_rot_z+180], degrees=True).as_quat()
         pose = np.concatenate([world_coords, quat])
 
         action_dict = {
             "pose": pose, 
             "pixel_coords": np.array([u, v]),
-            "gripper_rot": self.gripper_rot_z,
+            "gripper_rot": -self.gripper_rot_z + 180, # defined wrt base frame, note z-axis of gripper frame points in direction of grasp
         }
 
         if self.mode == "pick":
@@ -471,7 +471,11 @@ def main(args=None):
             "overhead_camera/rgb": tfds.features.Tensor(shape=(621,1104, 3), dtype=np.uint8),
             "overhead_camera/depth": tfds.features.Tensor(shape=(621,1104), dtype=np.float32),
         }),
-        action_info=tfds.features.Tensor(shape=(7,), dtype=tf.float64),
+        action_info=tfds.features.FeaturesDict({
+            "pose": tfds.features.Tensor(shape=(7,), dtype=np.float64),
+            "pixel_coords": tfds.features.Tensor(shape=(2,), dtype=np.int64),
+            "gripper_rot": np.float64,
+        }),
         reward_info=tf.float64,
         discount_info=tf.float64,
         episode_metadata_info={
