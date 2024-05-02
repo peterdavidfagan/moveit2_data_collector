@@ -428,12 +428,18 @@ class MainWindow(QMainWindow):
         quat = R.from_euler('xyz', [0, 180, self.gripper_rot_z], degrees=True).as_quat()
         pose = np.concatenate([world_coords, quat])
 
+        action_dict = {
+            "pose": pose, 
+            "pixel_coords": np.array([u, v]),
+            "gripper_rot": self.gripper_rot_z,
+        }
+
         if self.mode == "pick":
             self.env.set_observation(self.rgb_image, self.depth_image)
-            worker = Worker(self.env.step, pose)
+            worker = Worker(self.env.step, action_dict)
         else:
             self.env.set_observation(self.rgb_image, self.depth_image)
-            worker = Worker(self.env.step, pose)
+            worker = Worker(self.env.step, action_dict)
         
         self.threadpool.start(worker)
     

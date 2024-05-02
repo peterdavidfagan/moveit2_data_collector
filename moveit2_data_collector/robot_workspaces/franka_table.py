@@ -171,11 +171,11 @@ class FrankaTable(dm_env.Environment):
                 observation=deepcopy(self.current_observation),
                 )
 
-    def step(self, pose) -> dm_env.TimeStep:
+    def step(self, action_dict) -> dm_env.TimeStep:
         if self.mode == "pick":
-            self.pick(pose)
+            self.pick(action_dict["pose"])
         else:
-            self.place(pose)
+            self.place(action_dict["pose"])
 
         return dm_env.TimeStep(
                 step_type=dm_env.StepType.MID,
@@ -200,20 +200,21 @@ class FrankaTable(dm_env.Environment):
                 }
 
     def action_spec(self) -> dm_env.specs.Array:
-        return dm_env.specs.Array(
-                shape=(7,), # [x, y, z, qx, qy, qz, qw]
-                dtype=np.float64,
-                )
+        return {
+                "pose": dm_env.specs.Array(shape=(7,), dtype=np.float64), # [x, y, z, qx, qy, qz, qw]
+                "pixel_coords": dm_env.specs.Array(shape=(2,), dtype=np.int), # [u, v]
+                "gripper_rot": dm_env.specs.Array(shape=(1,), dtype=np.float64),
+                }
     
     def reward_spec(self) -> dm_env.specs.Array:
         return dm_env.specs.Array(
-                shape=(7,), # [x, y, z, qx, qy, qz, qw]
+                shape=(),
                 dtype=np.float64,
                 )
 
     def discount_spec(self) -> dm_env.specs.Array:
         return dm_env.specs.Array(
-                shape=(7,), # [x, y, z, qx, qy, qz, qw]
+                shape=(),
                 dtype=np.float64,
                 )
 
