@@ -83,10 +83,15 @@ class FrankaTable(dm_env.Environment):
     This dm_env is intended to be used in conjunction with PyQt data collection application. This environment abstraction is intended to make data collection compatible with env_logger.
     """
 
-    def __init__(self, args):
-        robot_ip = args.robot_ip
-        use_gripper = args.use_gripper
-        use_fake_hardware = args.use_fake_hardware
+    def __init__(self, args=None):
+        if args not None:
+            robot_ip = args.robot_ip
+            use_gripper = args.use_gripper
+            use_fake_hardware = args.use_fake_hardware
+        else:
+            robot_ip = "192.168.106.99"
+            use_gripper = "true"
+            use_fake_hardware = "false"
         self.robotiq_tcp_z_offset = 0.17 # TODO: consider moving to franka_robotiq launch file as static tf
         
         moveit_config = (
