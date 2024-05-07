@@ -84,14 +84,15 @@ class FrankaTable(dm_env.Environment):
     """
 
     def __init__(self, args=None):
-        if args not None:
             robot_ip = args.robot_ip
             use_gripper = args.use_gripper
             use_fake_hardware = args.use_fake_hardware
+            gripper_controller = args.gripper_controller
         else:
             robot_ip = "192.168.106.99"
             use_gripper = "true"
             use_fake_hardware = "false"
+            gripper_controller = "/robotiq/robotiq_gripper_controller/gripper_cmd"
         self.robotiq_tcp_z_offset = 0.17 # TODO: consider moving to franka_robotiq launch file as static tf
         
         moveit_config = (
@@ -117,7 +118,7 @@ class FrankaTable(dm_env.Environment):
         self.panda = MoveItPy(config_dict=moveit_config)
         self.planning_scene_monitor = self.panda.get_planning_scene_monitor()
         self.panda_arm = self.panda.get_planning_component("panda_arm") 
-        self.gripper_client = GripperClient(args.gripper_controller)
+        self.gripper_client = GripperClient(gripper_controller)
 
         # add ground plane
         with self.planning_scene_monitor.read_write() as scene:
