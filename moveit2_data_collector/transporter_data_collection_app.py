@@ -444,8 +444,8 @@ class MainWindow(QMainWindow):
         self.threadpool.start(worker)
     
     def env_reset(self):
-        self.env.set_observation(self.rgb_image, self.depth_image)
         self.env.reset()
+        self.env.set_observation(self.rgb_image, self.depth_image)
 
     def env_done(self):
         self.env.set_observation(self.rgb_image, self.depth_image)
