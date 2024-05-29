@@ -84,6 +84,7 @@ class FrankaTable(dm_env.Environment):
     """
 
     def __init__(self, args=None):
+        if args is not None:
             robot_ip = args.robot_ip
             use_gripper = args.use_gripper
             use_fake_hardware = args.use_fake_hardware
